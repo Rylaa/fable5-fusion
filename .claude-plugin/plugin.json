@@ -1,0 +1,19 @@
+{
+  "name": "fable5-fusion",
+  "displayName": "Fable5 Fusion (Claude Code + Codex)",
+  "version": "1.0.0",
+  "description": "Multi-model fusion for Claude Code + Codex: a parallel panel (2x Claude Opus 4.8 + 1x GPT-5.5 via codex) answers a task independently and blind, then Opus 4.8 judges (Track A code: run both & merge / Track B research: structured synthesis) and a GPT-5.5 synthesizer writes one final answer grounded in the analysis.",
+  "author": {
+    "name": "yusuf"
+  },
+  "license": "MIT",
+  "keywords": [
+    "fusion",
+    "multi-model",
+    "claude-code",
+    "codex",
+    "synthesis",
+    "ensemble",
+    "panel"
+  ]
+}

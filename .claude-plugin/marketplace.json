@@ -1,0 +1,17 @@
+{
+  "name": "fable5-fusion",
+  "owner": { "name": "Rylaa" },
+  "metadata": {
+    "description": "Multi-model fusion for Claude Code + Codex, packaged as a plugin.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "fable5-fusion",
+      "description": "Panel of 2x Claude Opus 4.8 + 1x GPT-5.5 (codex) answers in parallel and blind; Opus 4.8 judges; GPT-5.5 (codex, xhigh) synthesizes the final answer.",
+      "version": "1.0.0",
+      "author": { "name": "Rylaa" },
+      "source": "."
+    }
+  ]
+}
