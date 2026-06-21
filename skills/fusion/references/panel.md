@@ -26,13 +26,19 @@ Cross-pollination before the judge defeats the entire mechanism.
 
 **2× Claude Opus 4.8 + 1× GPT-5.5 (codex)** — three independent answers to the same verbatim task:
 
-- **Opus 4.8 panelists ×2 (session effort)** — two independent cold runs as `Agent` subagents
-  (`subagent_type: general-purpose`), web + bash built in. Same prompt, two cold runs; each told to reason
-  at maximum depth. The Opus seats run at the **session's** reasoning effort — run the Fusion session at
-  `/effort max` so the subagents inherit it (the `Agent` tool has no per-call effort flag).
+- **Opus 4.8 panelists ×2 (`max`)** — two independent cold runs via `run_claude.sh`, which runs
+  `claude -p --model claude-opus-4-8` against a throwaway copy of the repo (web + bash), exporting
+  `CLAUDE_CODE_EFFORT_LEVEL=max` (the highest-precedence effort knob, above the `--effort` flag and
+  `settings.json`) **and** passing `--effort max`, so each panelist hits max regardless of the session's
+  inherited effort (only a `settings.json` `env` pin of a different value could override it). (This is why
+  the panelists do **not** go through the `Agent` tool: agent-teams can't set a per-call effort, so teammates
+  just inherit config.) Same prompt, two cold runs.
 - **GPT-5.5 panelist ×1 (`xhigh`, locked)** — one run via `run_codex.sh`, at `xhigh` reasoning on codex's
   priority (fast) service tier, sandboxed against a throwaway copy of the repo (web + bash, no writes to
   your checkout). A different model family broadens the panel.
+
+The **judge** is the exception: it is the orchestrator (you), not a wrapped subprocess, so it runs at the
+**session's** reasoning effort — run the Fusion session at `/effort max` for a max-depth judge.
 
 The panelists are kept separate from the two downstream seats: **Opus 4.8 judges** all three (analysis
 only), and a separate **GPT-5.5 synthesizer** (codex, xhigh) writes the final answer. Because the judge
@@ -43,5 +49,5 @@ rather than defending one it wrote itself.
 
 Each panelist receives the user's task **verbatim**, plus a short instruction: *research with web search
 and bash, then return a complete, self-contained answer; you are one of several independent experts and
-will not see the others' work; reason at maximum depth before answering.* Nothing more — no lens, no
-framing that nudges the conclusion.
+will not see the others' work; reason at maximum depth before answering; answer it yourself — do not
+delegate or spawn sub-agents.* Nothing more — no lens, no framing that nudges the conclusion.

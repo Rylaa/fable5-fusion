@@ -3,6 +3,35 @@
 All notable changes to fable5-fusion are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0] - 2026-06-21
+
+Lock the Opus panelists at **max** reasoning effort — independent of the session.
+
+### Changed
+- **Opus panelists now run via `claude -p`, not the `Agent` tool.** A new `run_claude.sh` launches each of
+  the two Opus 4.8 panelists as `claude -p --model claude-opus-4-8` against a throwaway copy of the repo,
+  exporting `CLAUDE_CODE_EFFORT_LEVEL=max` (the **highest-precedence** effort knob — above the `--effort`
+  flag and `settings.json`) **and** also passing `--effort max`. So the panelists hit **max** regardless of
+  the session's inherited effort; the only thing that can override it is a `settings.json` `env` block
+  pinning a different `CLAUDE_CODE_EFFORT_LEVEL`.
+
+### Fixed
+- **Panelists silently ran below max.** Under agent-teams (`teammateMode: tmux`), `Agent`-tool panelists
+  spawn as fresh `claude` sessions whose effort comes from config (`CLAUDE_CODE_EFFORT_LEVEL`, else
+  `settings.json` `effortLevel`), not from the orchestrator: its transient `/effort max` is "this session
+  only" and does **not** propagate to tmux teammates, and the `Agent` tool exposes no per-call effort flag.
+  Routing panelists through `run_claude.sh` — which sets the effort explicitly per call — makes max a
+  parameter, not a hope. (The **judge** is still the orchestrator and follows the session's effort — run
+  Fusion at `/effort max` for a max-depth judge.)
+
+### Added
+- `run_claude.sh` (mirrors `run_codex.sh`): runs one Opus seat at a locked effort against a throwaway repo
+  copy; sets both the `CLAUDE_CODE_EFFORT_LEVEL` env var and `--effort`; blocks recursive sub-agent/teammate
+  spawning with `--disallowedTools "Task Agent"`; override the model with `FUSION_CLAUDE_MODEL`.
+- `detect_panel.sh` now checks **both** `claude` and `codex` (prints `CLAUDE=`, `CODEX=`, `PANEL=`).
+- `run_codex.sh` warns when `FUSION_SERVICE_TIER` is set to a non-`priority` value (codex silently coerces
+  unrecognized tiers to its default, dropping fast mode).
+
 ## [1.0.0] - 2026-06-19
 
 Initial release — a Claude Code plugin for multi-model fusion.

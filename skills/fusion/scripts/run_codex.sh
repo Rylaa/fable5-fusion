@@ -81,7 +81,13 @@ fi
 
 # Build the codex args; only add service_tier when non-empty (empty = use config.toml default).
 tier_args=()
-[ -n "$service_tier" ] && tier_args=(-c "service_tier=$service_tier")
+if [ -n "$service_tier" ]; then
+  tier_args=(-c "service_tier=$service_tier")
+  # Only `priority` is the confirmed fast tier in codex 0.139; unrecognized values (e.g. a typo, or `flex`)
+  # are SILENTLY coerced to codex's default/auto tier — fast mode would be lost with no error. Surface it.
+  [ "$service_tier" != "priority" ] && \
+    echo "[run_codex.sh] WARNING: FUSION_SERVICE_TIER='$service_tier' is not the known fast tier 'priority'; codex may fall back to its default tier (fast mode off)." >&2
+fi
 
 codex exec \
   --skip-git-repo-check \

@@ -8,7 +8,7 @@ Fan one prompt out to a panel of frontier models, let them answer **independentl
 then let Opus judge and GPT‑5.5 synthesize the one answer worth keeping.
 
 [![License](https://img.shields.io/badge/License-MIT-1e6feb?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-2ea043?style=flat-square)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-2ea043?style=flat-square)](.claude-plugin/plugin.json)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-d97757?style=flat-square)](https://claude.com/claude-code)
 [![Panel](https://img.shields.io/badge/panel-2×_Opus_4.8_+_GPT--5.5-8957e5?style=flat-square)](#-the-panel)
 [![Codex](https://img.shields.io/badge/Codex-GPT--5.5-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)
@@ -34,9 +34,9 @@ them and a **GPT‑5.5 synthesizer** writes the final answer grounded in that an
                           │   verbatim · no lenses · blind
         ┌─────────────────┼─────────────────┐
         ▼                 ▼                 ▼
-    Opus 4.8 ①        Opus 4.8 ②        GPT‑5.5          ╮  PANEL
-    (Agent)            (Agent)           (codex)         │  parallel
-   web + bash         web + bash        web + bash       ╯  & independent
+    Opus 4.8 ①        Opus 4.8 ②        GPT‑5.5          ╮  PANEL · parallel
+   (claude -p)        (claude -p)        (codex)         │  & independent
+   max · locked       max · locked      xhigh · locked   ╯  web+bash · blind
         └─────────────────┼─────────────────┘
                           ▼
                   JUDGE · Opus 4.8            ◄─ session effort †
@@ -61,15 +61,18 @@ independence*, not manufactured with personas.
 
 | Seat | Model | Runs via | Effort | Job |
 |:--|:--|:--|:--:|:--|
-| 🟠 Panelist 1 | **Claude Opus 4.8** | `Agent` subagent | max † | independent answer |
-| 🟠 Panelist 2 | **Claude Opus 4.8** | `Agent` subagent | max † | independent answer (2nd cold run) |
-| 🟣 Panelist 3 | **GPT‑5.5** | `codex` | `xhigh` (locked) | independent answer |
+| 🟠 Panelist 1 | **Claude Opus 4.8** | `claude -p` (`run_claude.sh`) | `max` (locked) | independent answer |
+| 🟠 Panelist 2 | **Claude Opus 4.8** | `claude -p` (`run_claude.sh`) | `max` (locked) | independent answer (2nd cold run) |
+| 🟣 Panelist 3 | **GPT‑5.5** | `codex` (`run_codex.sh`) | `xhigh` (locked) | independent answer |
 | ⚖️ Judge | **Claude Opus 4.8** | orchestrator | session † | structured analysis — *not* the final answer |
-| ✍️ Synthesizer | **GPT‑5.5** | `codex` | `xhigh` (locked) | writes the **one** final answer |
+| ✍️ Synthesizer | **GPT‑5.5** | `codex` (`run_codex.sh`) | `xhigh` (locked) | writes the **one** final answer |
 
-> **† Opus effort isn't parameter‑locked.** The `Agent` tool has no per‑call effort flag and the judge is
-> the orchestrator itself, so the Opus seats run at the **session's** reasoning effort — run Fusion at
-> `/effort max` for true max. Only the GPT‑5.5 seats are locked at `xhigh`.
+> **† Only the judge follows the session's effort.** The two Opus *panelists* are set to max explicitly —
+> `run_claude.sh` exports `CLAUDE_CODE_EFFORT_LEVEL=max` (the highest‑precedence effort knob, above the
+> `--effort` flag and `settings.json`) and also passes `--effort max`, so they hit max regardless of the
+> session's inherited effort (only a `settings.json` `env` pin of a different value could override it). The
+> judge is the orchestrator itself, so it runs at the **session's** effort — run Fusion at `/effort max` for
+> a max‑depth judge. The GPT‑5.5 seats are locked at `xhigh`.
 
 > **Why split judge and synthesizer?** Opus *analyzes* the panel; a separate
 > GPT‑5.5 *writes* the answer. Splitting "analyze" from "write" — and crossing model families
@@ -97,8 +100,8 @@ final answer followed by a per‑seat audit trail.
 
 | Step | What happens |
 |:--:|:--|
-| **0** | `detect_panel.sh` confirms `codex` is ready (the panel needs it for the GPT‑5.5 seats). |
-| **1** | Fan out — 2× Opus 4.8 (`Agent`) + 1× GPT‑5.5 (`codex`), in parallel and blind, task verbatim. |
+| **0** | `detect_panel.sh` confirms `claude` + `codex` are ready (panelists need `claude`; the GPT‑5.5 seats need `codex`). |
+| **1** | Fan out — 2× Opus 4.8 (`claude -p`, locked max) + 1× GPT‑5.5 (`codex`, xhigh), in parallel and blind, task verbatim. |
 | **2** | **Judge** — Opus 4.8 reads all three and produces a structured analysis. |
 | **3** | **Synthesize** — GPT‑5.5 (`xhigh`) writes the final answer from that analysis. |
 | **4** | **Present** — final answer first, then the audit trail (attribution + analysis). |
@@ -115,20 +118,23 @@ Two tracks, chosen automatically:
 
 ## 🔒 Isolation — safe by default
 
-The GPT‑5.5 seats run **sandboxed** (`codex -s workspace-write`) against a throwaway **copy** of
-your repo, set as their working root with `--cd`:
+**Every** runner seat — the panelists and the synthesizer — works against its own throwaway **copy** of
+your repo, so candidate writes never touch your live checkout (the judge is the orchestrator and gets none):
 
 ```text
-your repo  ──(rsync copy)──►  /tmp/fusion-codex.XXXX/workdir   ◄── codex works HERE
-   ▲                                                                 (sees context, writes locally)
+your repo  ──(rsync copy)──►  /tmp/fusion-*.XXXX/workdir   ◄── each seat works HERE
+   ▲                                                            (sees context, writes in the copy)
    └── never touched · live checkout stays clean
 ```
 
-✅ Sees your project for context &nbsp; ✅ web + bash &nbsp; ✅ host outside the copy is protected
+- **GPT‑5.5 seats (`codex`)** are additionally **OS‑sandboxed** (`-s workspace-write`): codex may read and
+  write only inside its copy. This deliberately avoids `--dangerously-bypass-approvals-and-sandbox`, which
+  codex's own help flags as *"EXTREMELY DANGEROUS … solely for environments that are externally sandboxed"*.
+- **Opus seats (`claude -p`)** run with the copy as their working directory, so candidate files land in the
+  copy. This is CWD isolation — the same trust level as the `Agent`‑tool teammates it replaces, not a hard
+  filesystem sandbox.
 
-This deliberately avoids `--dangerously-bypass-approvals-and-sandbox`, which codex's own help flags
-as *"EXTREMELY DANGEROUS … solely for environments that are externally sandboxed"* — a normal dev
-machine is not.
+✅ Sees your project for context &nbsp; ✅ web + bash &nbsp; ✅ live checkout stays clean
 
 ---
 
@@ -136,11 +142,12 @@ machine is not.
 
 | | |
 |:--|:--|
-| **Claude Code** | The 2 Opus 4.8 panelists run as `Agent` subagents; the judge is the orchestrator itself — both always available. |
+| **`claude` CLI** | **Required, on your `PATH`.** The 2 Opus 4.8 panelists run as `claude -p --model claude-opus-4-8 --effort max` subprocesses — so they hit max regardless of the session. The judge is the orchestrator itself. |
 | **`codex` CLI** | **Required.** Runs the GPT‑5.5 panelist + the synthesizer. Logged in with GPT‑5.5 access. Tested against `codex-cli` 0.139. |
 
-If `codex` is missing, the skill tells you and offers an Opus‑only fallback rather than silently
-changing the panel.
+If `claude` isn't on PATH, the skill falls back to spawning the Opus panelists with the `Agent` tool (they
+inherit the session effort, not max). If `codex` is missing, it offers an Opus‑only fallback rather than
+silently changing the panel.
 
 ---
 
@@ -151,9 +158,16 @@ judge and a synthesizer pass. That's the deliberate trade: you spend more to sto
 wrong **where that's expensive** — high‑stakes research, design calls, gnarly debugging. For quick
 or low‑stakes questions, a single direct answer is the right call.
 
+Each seat also rsyncs its **own** throwaway copy of the repo (two Opus + one GPT panelist + one synth), so
+a run makes several copies — bounded by repo size. Run Fusion from your project dir, not a huge unrelated
+parent.
+
 The GPT‑5.5 seats run on codex's **priority service tier** (`service_tier=priority`) — full `xhigh`
-reasoning quality, served faster. Override with `FUSION_SERVICE_TIER` (e.g. `flex`, or empty to fall
-back to your `~/.codex/config.toml` default).
+reasoning quality, served faster. Override with `FUSION_SERVICE_TIER`, or set it empty to fall back to your
+`~/.codex/config.toml` default. Note: in codex 0.139 only `priority` is the confirmed fast tier —
+unrecognized values are silently coerced to codex's default tier (the runner warns when you set a non‑`priority`
+value). The Opus seats default to `claude-opus-4-8` (Opus 4.8, standard window — ample for panelist
+prompts); override with `FUSION_CLAUDE_MODEL` (e.g. `claude-opus-4-8[1m]` for the 1M‑context variant).
 
 ---
 
