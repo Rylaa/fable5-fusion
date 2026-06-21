@@ -2,11 +2,10 @@
 
 Two seats, two jobs:
 
-- **Judge — Claude Opus 4.8 (the orchestrator) — at the session reasoning effort (run /effort max for full depth).** Reads every panelist response
-  *after* all returned independently and produces a structured **analysis**. It does **not** write the
-  final answer.
-- **Synthesizer — GPT-5.5 (codex), xhigh.** Takes the judge analysis + the panel answers and writes the
-  **one final deliverable**.
+- **Judge — GPT-5.5 (codex), xhigh (priority/fast tier).** Reads every panelist response *after* all
+  returned independently and produces a structured **analysis**. It does **not** write the final answer.
+- **Synthesizer — Claude Opus 4.8 (`claude -p`), max.** Takes the judge analysis + the panel answers and
+  writes the **one final deliverable**.
 
 Neither votes or averages. **First classify the deliverable**, then both seats follow the matching track:
 
@@ -19,7 +18,7 @@ code, fold the reasoning in as brief rationale.
 
 ---
 
-## Judge (Opus 4.8) — produce the analysis
+## Judge (GPT-5.5 via codex) — produce the analysis
 
 Read every panelist response in full and attribute by seat ("Opus run 1", "Opus run 2", "GPT-5.5") so
 the user can trace every decision. A panelist that failed or was dropped is **absent**, never silent
@@ -46,7 +45,7 @@ Hand this analysis to the synthesizer. Do not write the final answer yourself.
 
 ---
 
-## Synthesizer (GPT-5.5 via codex, xhigh) — write the final answer
+## Synthesizer (Claude Opus 4.8 via claude -p, max) — write the final answer
 
 The synth prompt contains the original task, the judge analysis, and all panel answers. Produce **one**
 final deliverable that merges the genuinely best parts — not an average, not one answer lightly edited.

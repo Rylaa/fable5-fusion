@@ -37,13 +37,14 @@ Cross-pollination before the judge defeats the entire mechanism.
   priority (fast) service tier, sandboxed against a throwaway copy of the repo (web + bash, no writes to
   your checkout). A different model family broadens the panel.
 
-The **judge** is the exception: it is the orchestrator (you), not a wrapped subprocess, so it runs at the
-**session's** reasoning effort — run the Fusion session at `/effort max` for a max-depth judge.
+Every downstream seat is a locked subprocess too: the **judge** and the **synthesizer** each run as their
+own wrapped runner at a fixed effort, so the Fusion session's own effort no longer affects output — the
+orchestrator only coordinates.
 
-The panelists are kept separate from the two downstream seats: **Opus 4.8 judges** all three (analysis
-only), and a separate **GPT-5.5 synthesizer** (codex, xhigh) writes the final answer. Because the judge
-and synthesizer are distinct seats — and cross model families — the synthesis reads the answers fresh
-rather than defending one it wrote itself.
+The panelists are kept separate from the two downstream seats: **GPT-5.5 (codex, xhigh) judges** all three
+(analysis only), and a separate **Claude Opus 4.8 synthesizer** (`claude -p`, max) writes the final answer.
+Because the judge and synthesizer are distinct seats — and cross model families — the synthesis reads the
+answers fresh rather than defending one it wrote itself.
 
 ## Prompt each panelist gets
 

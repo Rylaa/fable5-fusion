@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_claude.sh — run ONE Opus 4.8 panelist via the `claude` CLI at a LOCKED reasoning effort.
+# run_claude.sh — run ONE Opus 4.8 seat (panelist OR synthesizer) via the `claude` CLI at a LOCKED effort.
 #
 # Usage:
 #   run_claude.sh <prompt_file> <output_file> [reasoning_effort] [model]
@@ -12,10 +12,11 @@
 #                       variant; the default uses the standard window, ample for panelist prompts)
 #
 # WHY THIS SCRIPT EXISTS (the whole point):
-#   Spawning a panelist through the `Agent` tool / agent-teams makes it a fresh `claude` session whose
+#   Used for BOTH Opus seats — the two panelists (Step 1) and the synthesizer (Step 3).
+#   Spawning an Opus seat through the `Agent` tool / agent-teams makes it a fresh `claude` session whose
 #   effort comes from config, NOT from the orchestrator: the `Agent` tool has no per-call effort flag, and
 #   the orchestrator's transient `/effort max` is "this session only" and does NOT propagate to (tmux)
-#   teammates — so the Opus panelists silently run at whatever effort the config resolves to. This script
+#   teammates — so those Opus seats silently run at whatever effort the config resolves to. This script
 #   sets the effort EXPLICITLY, per call, instead.
 #
 #   Effort precedence in Claude Code (highest -> lowest):

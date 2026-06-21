@@ -3,6 +3,21 @@
 All notable changes to fable5-fusion are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] - 2026-06-21
+
+Swap the judge and synthesizer model families.
+
+### Changed
+- Judge is now GPT-5.5 (codex, xhigh, priority/fast tier) instead of the Opus orchestrator; the orchestrator
+  no longer judges.
+- Synthesizer is now Claude Opus 4.8 (`claude -p` via `run_claude.sh`, locked max) instead of GPT-5.5.
+- Consequence: every reasoning seat (2 Opus panelists, 1 GPT panelist, GPT judge, Opus synth) is now a
+  parameter-locked subprocess; output no longer depends on the orchestrator's session effort. The
+  orchestrator is a pure coordinator.
+
+The judge/synth split stays cross-family — now GPT-5.5 analyzes and Opus writes, so the writer still isn't
+grading its own draft.
+
 ## [1.1.0] - 2026-06-21
 
 Lock the Opus panelists at **max** reasoning effort — independent of the session.

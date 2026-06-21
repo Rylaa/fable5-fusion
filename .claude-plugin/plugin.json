@@ -1,8 +1,8 @@
 {
   "name": "fable5-fusion",
   "displayName": "Fable5 Fusion (Claude Code + Codex)",
-  "version": "1.1.0",
-  "description": "Multi-model fusion for Claude Code + Codex: a parallel panel (2x Claude Opus 4.8 via `claude -p` locked at --effort max + 1x GPT-5.5 via codex at xhigh) answers a task independently and blind, then Opus 4.8 judges (Track A code: run both & merge / Track B research: structured synthesis) and a GPT-5.5 synthesizer writes one final answer grounded in the analysis.",
+  "version": "1.2.0",
+  "description": "Multi-model fusion for Claude Code + Codex: a parallel panel (2x Claude Opus 4.8 via `claude -p` locked at --effort max + 1x GPT-5.5 via codex at xhigh) answers a task independently and blind, then GPT-5.5 (codex, xhigh) judges and a Claude Opus 4.8 synthesizer (via `claude -p`, locked max) writes one final answer grounded in the analysis (Track A code: run candidates & merge / Track B research: structured synthesis).",
   "author": {
     "name": "yusuf"
   },

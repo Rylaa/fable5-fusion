@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_codex.sh — run one GPT-5.5 seat (panelist OR synthesizer) via codex, with web search + bash.
+# run_codex.sh — run one GPT-5.5 seat (panelist OR judge) via codex, with web search + bash.
 #
 # Usage:
 #   run_codex.sh <prompt_file> <output_file> [reasoning_effort]
