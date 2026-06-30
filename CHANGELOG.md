@@ -3,6 +3,29 @@
 All notable changes to fable5-fusion are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0] - 2026-06-30
+
+### Added
+- **Codex CLI support (additive).** A new `codex/` directory lets you run the same Fusion panel from the
+  Codex CLI with `/fusion <task>`, mirroring the Claude Code `/fable5-fusion:fusion` experience. Codex
+  (GPT-5.5) becomes the orchestrator; the panel is unchanged (2x Opus 4.8 + 1x GPT-5.5 panelists,
+  GPT-5.5 judge, Opus 4.8 synth) and reuses the existing seat runners (`run_claude.sh`, `run_codex.sh`,
+  `save_run.sh`, ...) verbatim.
+  - `codex/fusion-runner.sh` — a deterministic Step 0-6 orchestrator (detect -> preflight -> fan out ->
+    judge -> synth -> save -> present) so the codex prompt stays thin (it just pipes the task to the
+    runner on stdin). Streams progress to stderr; prints `FUSION FINAL ANSWER` + `FUSION AUDIT TRAIL`.
+  - `codex/prompts/fusion.md` — the `/fusion` custom prompt (installed to `~/.codex/prompts/`).
+  - `codex/install.sh` — additive installer; never silently overwrites a different existing
+    `fusion.md` / `fusion-runner.sh` (refuses without `--force`; backs the old file up with it).
+  - `codex/tests/fusion-runner.test.sh` — 29 stubbed orchestration assertions (seat fan-out, ordering,
+    degraded claude-missing path, provenance slugs, synth model routing).
+  - `codex/README.md` — install / run / sandbox notes.
+- The Codex orchestrator must run un-sandboxed (`codex --sandbox danger-full-access --ask-for-approval
+  never`): macOS Seatbelt cannot be nested, and each GPT-5.5 seat applies its own `-s workspace-write`
+  sandbox, so a sandboxed parent would kill the nested seats (verified empirically). The seats' own
+  isolation is unchanged — only the orchestrator is unsandboxed. Nothing in the Claude Code plugin
+  (`skills/`, `commands/`, `references/`) is touched.
+
 ## [1.3.1] - 2026-06-30
 
 ### Changed
