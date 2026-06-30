@@ -46,7 +46,7 @@ verbatim and answers it straight. (See `references/panel.md`.)
 > seats don't go through them.) The one thing that still wins over this is a `settings.json` `env` block
 > pinning a different `CLAUDE_CODE_EFFORT_LEVEL`. The GPT-5.5 _panelist_ and the GPT-5.5 _judge_ are locked
 > at `xhigh` in `run_codex.sh`. **Every seat is also time-bounded** — each runner wraps its CLI call in a
-> per-seat timeout (`FUSION_TIMEOUT`, default 300s) so one stuck seat can't hang the panel.
+> per-seat timeout (`FUSION_TIMEOUT`, default 1800s) so one stuck seat can't hang the panel.
 
 **The judge and the synthesizer are deliberately different seats.** GPT-5.5 (codex) analyzes the panel; a
 separate Claude Opus 4.8 commits the final answer. Splitting "analyze" from "write" — and crossing model
@@ -88,7 +88,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/fusion/scripts/preflight.sh" /tmp/fusion_ques
 
 Show its output to the user (a rough token estimate for the fixed 5-seat panel, the per-seat timeout, and a
 Codex cap reminder), then proceed. It **never blocks** — it always exits 0, it only informs. Each seat is
-bounded by a per-seat timeout (`FUSION_TIMEOUT`, default 300s) baked into the runners; raise it for heavy
+bounded by a per-seat timeout (`FUSION_TIMEOUT`, default 1800s) baked into the runners; raise it for heavy
 deep-research questions or big code merges (prefix the runner calls with `FUSION_TIMEOUT=900`).
 
 ## Step 2 — Fan out: 2 Opus 4.8 (max) + 1 GPT-5.5 (xhigh), parallel and blind
@@ -121,7 +121,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/fusion/scripts/run_codex.sh"  "PDIR/prompt.md
 ```
 
 Each runner wraps its CLI call in a **per-seat timeout** (`_fusion_lib.sh`'s `_run_with_timeout`,
-`FUSION_TIMEOUT` default **300s**), so no single seat can hang the panel. You'll be notified as each
+`FUSION_TIMEOUT` default **1800s**), so no single seat can hang the panel. You'll be notified as each
 background task finishes — whether it completed, exited non-zero, or hit its timeout (**exit 124**). Read
 that seat's output file then. While they run, keep the user posted on which seats are still going so the run
 never looks frozen. Proceed to judging once all three have finished **or are confirmed absent**. For a heavy
@@ -240,7 +240,7 @@ how to enable the full panel. Unless `FUSION_NO_SAVE` was set, mention the prove
 ## Cost & latency note
 
 A panel costs roughly N× a single answer in tokens and runs as slow as its slowest seat, plus a judge and
-a synthesizer pass. Each seat is bounded by `FUSION_TIMEOUT` (default 300s) so a stuck seat degrades the
+a synthesizer pass. Each seat is bounded by `FUSION_TIMEOUT` (default 1800s) so a stuck seat degrades the
 panel instead of hanging it; raise it for deep research or big merges. **Every** reasoning seat now works
 against its **own throwaway copy** of the repo (an rsync per seat) — the 2 Opus panelists, the 1 GPT-5.5
 panelist, the GPT-5.5 judge, and the Opus synthesizer — so a run makes up to **five** copies, bounded by

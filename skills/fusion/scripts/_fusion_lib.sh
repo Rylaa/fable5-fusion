@@ -14,19 +14,20 @@
 #
 # Bash 3.2 safe (macOS default): no associative arrays, no `local -n`, no process substitution.
 
-# Default per-seat budget in seconds; override with FUSION_TIMEOUT (e.g. FUSION_TIMEOUT=900 for deep research).
-FUSION_TIMEOUT="${FUSION_TIMEOUT:-300}"
+# Default per-seat budget in seconds; override with FUSION_TIMEOUT (e.g. FUSION_TIMEOUT=3600 for a very heavy
+# Opus-at-max merge, or FUSION_TIMEOUT=600 to reclaim a stuck seat faster on quick/low-stakes runs).
+FUSION_TIMEOUT="${FUSION_TIMEOUT:-1800}"
 
 # Validate it: must be a positive integer number of seconds. Anything else (empty, non-numeric, <=0, a
-# decimal) falls back to 300 — we never silently accept 0/garbage, because alarm(0) means "no alarm" and
+# decimal) falls back to 1800 — we never silently accept 0/garbage, because alarm(0) means "no alarm" and
 # would quietly DISABLE the per-seat deadline (the exact P1 invariant this helper exists to guarantee).
 case "$FUSION_TIMEOUT" in
   ''|*[!0-9]*) _ft_ok=0 ;;
   *) if [ "$FUSION_TIMEOUT" -gt 0 ] 2>/dev/null; then _ft_ok=1; else _ft_ok=0; fi ;;
 esac
 if [ "${_ft_ok:-0}" -ne 1 ]; then
-  echo "[_fusion_lib.sh] FUSION_TIMEOUT='${FUSION_TIMEOUT}' is not a positive integer of seconds; falling back to 300." >&2
-  FUSION_TIMEOUT=300
+  echo "[_fusion_lib.sh] FUSION_TIMEOUT='${FUSION_TIMEOUT}' is not a positive integer of seconds; falling back to 1800." >&2
+  FUSION_TIMEOUT=1800
 fi
 unset _ft_ok
 
@@ -47,7 +48,7 @@ _run_with_timeout() {
   fi
   perl -e '
     my $secs = shift @ARGV;
-    $secs = 300 unless ($secs =~ /^[0-9]+$/ && $secs > 0);   # defensive: positive int seconds
+    $secs = 1800 unless ($secs =~ /^[0-9]+$/ && $secs > 0);  # defensive: positive int seconds
     my $pid = fork();
     defined $pid or do { warn "fork failed: $!\n"; exit 127; };
     if ($pid == 0) {

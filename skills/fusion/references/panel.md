@@ -42,7 +42,7 @@ own wrapped runner at a fixed effort, so the Fusion session's own effort no long
 orchestrator only coordinates.
 
 Every seat is also **time-bounded**: the runner wraps it in a per-seat timeout (`FUSION_TIMEOUT`, default
-300s — see `_fusion_lib.sh`) and exits 124 if it runs over, so a stuck seat is auto-killed (the whole seat
+1800s — see `_fusion_lib.sh`) and exits 124 if it runs over, so a stuck seat is auto-killed (the whole seat
 process group, not just the top process) and treated as **absent** — never as silent agreement — rather than
 stalling the panel. Raise `FUSION_TIMEOUT` for heavy deep-research runs that legitimately need longer.
 

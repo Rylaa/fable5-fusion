@@ -29,7 +29,7 @@ echo "  prompt size  : ~${words} words (~${in_tokens} input tokens) sent to EACH
 echo "  note         : each panelist also writes a full answer, the judge then reads all $n_panel, and the"
 echo "                 synthesizer reads the analysis + all answers — real token cost is several× the input."
 echo "                 The run is as slow as its slowest seat; deep-research questions are slow."
-echo "  per-seat timeout : ${FUSION_TIMEOUT:-300}s each (override with FUSION_TIMEOUT; raise it for deep research)"
+echo "  per-seat timeout : ${FUSION_TIMEOUT:-1800}s each (override with FUSION_TIMEOUT; raise it for deep research)"
 
 if command -v claude >/dev/null 2>&1; then
   echo "  claude (Opus 4.8) : installed — 2 panelists + synthesizer run via run_claude.sh at locked max."

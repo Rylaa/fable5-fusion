@@ -22,7 +22,7 @@
 # - `-o/--output-last-message` writes ONLY the final message — no streaming noise to parse.
 # - The throwaway copy is deleted when the process exits.
 # - There is no `timeout`/`gtimeout` on stock macOS, so the codex run is wrapped in a self-contained
-#   perl timeout helper (FUSION_TIMEOUT, default 300s — see _fusion_lib.sh). On timeout the runner
+#   perl timeout helper (FUSION_TIMEOUT, default 1800s — see _fusion_lib.sh). On timeout the runner
 #   exits 124 so the orchestrator drops this GPT-5.5 seat and degrades the panel gracefully.
 
 set -uo pipefail
@@ -107,7 +107,7 @@ if [ -n "$service_tier" ]; then
     echo "[run_codex.sh] WARNING: FUSION_SERVICE_TIER='$service_tier' is not the known fast tier 'priority'; codex may fall back to its default tier (fast mode off)." >&2
 fi
 
-# Wrap in the per-seat timeout (FUSION_TIMEOUT, default 300s). The array/flag expansion happens in bash
+# Wrap in the per-seat timeout (FUSION_TIMEOUT, default 1800s). The array/flag expansion happens in bash
 # before perl sees the words, so service_tier / sandbox / effort are all preserved exactly. The caller's
 # redirections below apply to the wrapped codex process: stdin from the prompt file, stdout+stderr to the log.
 _run_with_timeout "$FUSION_TIMEOUT" codex exec \

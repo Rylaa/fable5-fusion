@@ -8,7 +8,7 @@ Fan one prompt out to a panel of frontier models, let them answer **independentl
 then let GPT‑5.5 judge and Opus synthesize the one answer worth keeping.
 
 [![License](https://img.shields.io/badge/License-MIT-1e6feb?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3.0-2ea043?style=flat-square)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.3.1-2ea043?style=flat-square)](.claude-plugin/plugin.json)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-d97757?style=flat-square)](https://claude.com/claude-code)
 [![Panel](https://img.shields.io/badge/panel-2×_Opus_4.8_+_GPT--5.5-8957e5?style=flat-square)](#-the-panel)
 [![Codex](https://img.shields.io/badge/Codex-GPT--5.5-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)
@@ -148,7 +148,7 @@ what each seat actually said. This build adds:
 
 - **⏱️ Per‑seat timeout.** Stock macOS has no `timeout`/`gtimeout`, so `_fusion_lib.sh` ships a
   self‑contained perl fork+alarm wrapper. **Every** runner (`run_codex.sh` *and* `run_claude.sh`) wraps its
-  CLI call in it: `FUSION_TIMEOUT` (default **300s**) bounds each seat, and a seat that runs over exits
+  CLI call in it: `FUSION_TIMEOUT` (default **1800s**) bounds each seat, and a seat that runs over exits
   **124** — the orchestrator treats it as **absent** and degrades the panel instead of waiting forever. The
   wrapper kills the seat's **whole process group** (SIGTERM → 2s grace → SIGKILL) so codex/claude children
   don't linger, returns 124 only for a *real* timeout (a seat that dies of its own signal is reported as
@@ -199,7 +199,7 @@ reasoning quality, served faster. Override with `FUSION_SERVICE_TIER`, or set it
 unrecognized values are silently coerced to codex's default tier (the runner warns when you set a non‑`priority`
 value). The Opus seats default to `claude-opus-4-8` (Opus 4.8, standard window — ample for panelist
 prompts); override with `FUSION_CLAUDE_MODEL` (e.g. `claude-opus-4-8[1m]` for the 1M‑context variant). Every
-seat is time‑bounded by `FUSION_TIMEOUT` (default 300s) — raise it for deep research or a big Track‑A merge
+seat is time‑bounded by `FUSION_TIMEOUT` (default 1800s) — raise it for deep research or a big Track‑A merge
 so a slow‑but‑valid seat isn't killed at the deadline, and skip the provenance record for sensitive runs with
 `FUSION_NO_SAVE=1`.
 

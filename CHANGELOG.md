@@ -3,6 +3,17 @@
 All notable changes to fable5-fusion are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.1] - 2026-06-30
+
+### Changed
+- Raised the default per-seat timeout `FUSION_TIMEOUT` from **300s to 1800s** (30 min). The 300s default
+  was too tight for an Opus 4.8 seat running at locked `max` on a heavy research or multi-file
+  implementation task — such seats legitimately need ~15-30 min and were being killed at the deadline
+  (exit 124) before finishing. The cap still prevents a genuinely stuck seat from hanging the panel;
+  override per run with `FUSION_TIMEOUT` (e.g. `FUSION_TIMEOUT=600` to reclaim a stuck seat faster on
+  quick runs, `FUSION_TIMEOUT=3600` for a very heavy merge). `_fusion_lib.sh` (default + garbage
+  fallback + perl-side default), `preflight.sh`, and all docs updated to match.
+
 ## [1.3.0] - 2026-06-30
 
 Operational hardening ported from upstream ([duolahypercho/fusion-fable](https://github.com/duolahypercho/fusion-fable)),

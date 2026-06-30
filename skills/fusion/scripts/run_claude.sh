@@ -40,10 +40,10 @@
 #   settings.json `env` block can re-enable agent-teams in the child, so we don't rely on it.
 #
 # Timeout: there is no `timeout`/`gtimeout` on stock macOS, so the claude run is wrapped in a
-# self-contained perl timeout helper (FUSION_TIMEOUT, default 300s — see _fusion_lib.sh). On timeout the
+# self-contained perl timeout helper (FUSION_TIMEOUT, default 1800s — see _fusion_lib.sh). On timeout the
 # runner exits 124 so the orchestrator drops this Opus seat and degrades gracefully (for the synthesizer
 # seat, that means the orchestrator writes the final answer itself). A big Track-A merge can need more
-# than 300s — raise FUSION_TIMEOUT for those.
+# than 1800s — raise FUSION_TIMEOUT for those.
 
 set -uo pipefail
 
