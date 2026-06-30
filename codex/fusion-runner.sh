@@ -37,13 +37,18 @@
 # USAGE
 #   bash fusion-runner.sh "your task"        # task from args
 #   bash fusion-runner.sh < task.txt         # task from stdin (preferred for big tasks: no ARG_MAX)
-#   FUSION_TIMEOUT=900 bash fusion-runner.sh "heavy deep-research task"
+#   FUSION_TIMEOUT=3600 bash fusion-runner.sh "heavy deep-research task"
 #
 # KNOBS (env)
 #   FUSION_SCRIPTS          override the plugin scripts dir (else auto-resolved).
 #   FUSION_TIMEOUT          per-seat budget, seconds (default 1800). Exported to every seat.
+#   FUSION_JUDGE_CLI        which CLI judges: auto (default; codex then claude), codex (codex only),
+#                           or claude (Opus judge from the start — cuts codex contention under a heavy cap).
 #   FUSION_SYNTH_MODEL      model id for the synth seat only (e.g. claude-opus-4-8[1m] for the
 #                           1M-context window on a big Track-A merge). Default: run_claude.sh's default.
+#   FUSION_SERVICE_TIER     codex service tier for the GPT-5.5 seats (run_codex.sh). Default 'priority'
+#                           (fast). Set EMPTY (FUSION_SERVICE_TIER=) to fall back to ~/.codex/config.toml
+#                           — drops priority-forcing, which is steadier on a subscription-auth'd codex.
 #   FUSION_NO_SAVE          set to any value to skip the provenance record (nothing hits disk).
 #   FUSION_PROGRESS_INTERVAL seconds between "still running" progress lines (default 20).
 #
@@ -199,7 +204,11 @@ if [ "$n_ok" = 0 ]; then
 fi
 
 # ---- Step 3 — judge (analysis only) ------------------------------------------------------------
-# Judge CLI: prefer codex (GPT-5.5, cross-family); fall back to claude only if codex is absent.
+# Judge CLI policy (FUSION_JUDGE_CLI): a single bad codex judge call must NOT silently degrade the run
+# to a judge-less synth, so the judge gets the same cross-family fallback the synth already has.
+#   auto   (default) cross-family: try codex (GPT-5.5, xhigh); if it fails/absent, retry on claude (Opus, max).
+#   codex            codex only — no claude retry (fail -> placeholder).
+#   claude           Opus judge from the start (skips codex entirely) — cuts codex contention under a heavy cap.
 log "Step 3 — judging (analysis only)..."
 {
   printf '# Task (verbatim)\n\n'; cat "$PDIR/question.md"
@@ -209,17 +218,38 @@ log "Step 3 — judging (analysis only)..."
   printf '\n# Judge instructions\n\n'; cat "$FUSION_REFS/judge_rubric.md"
   printf '\nYou are the JUDGE. Produce the structured ANALYSIS only (follow the Judge sections of the rubric). Do NOT write the final deliverable.\n'
 } > "$JDIR/judge_prompt.md"
-if [ "$codex_ok" = 1 ]; then
-  bash "$FUSION_SCRIPTS/run_codex.sh"  "$JDIR/judge_prompt.md" "$JDIR/judge_out.md" xhigh >>"$JDIR/judge.log" 2>&1
-else
-  bash "$FUSION_SCRIPTS/run_claude.sh" "$JDIR/judge_prompt.md" "$JDIR/judge_out.md" max   >>"$JDIR/judge.log" 2>&1
+judge_policy="${FUSION_JUDGE_CLI:-auto}"
+case "$judge_policy" in auto|codex|claude) ;; *)
+  log "  judge: FUSION_JUDGE_CLI='$judge_policy' unrecognized — using 'auto'"; judge_policy=auto ;;
+esac
+judge_ok=0; judge_cli=""; jrc=0
+
+# Attempt 1 — codex GPT-5.5 (skipped when the policy forces claude, or codex isn't present).
+if [ "$judge_policy" != claude ] && [ "$codex_ok" = 1 ]; then
+  bash "$FUSION_SCRIPTS/run_codex.sh" "$JDIR/judge_prompt.md" "$JDIR/judge_out.md" xhigh >>"$JDIR/judge.log" 2>&1
+  jrc=$?
+  [ "$jrc" = 0 ] && [ -s "$JDIR/judge_out.md" ] && { judge_ok=1; judge_cli="GPT-5.5 (codex, xhigh)"; }
 fi
-jrc=$?
-if [ "$jrc" = 0 ] && [ -s "$JDIR/judge_out.md" ]; then
-  log "  judge: OK"
+
+# Attempt 2 — claude Opus, when codex didn't produce a judge and the policy allows claude (auto/claude,
+# never codex). Under 'auto' this is the cross-family fallback; under 'claude' it is the first choice.
+if [ "$judge_ok" = 0 ] && [ "$judge_policy" != codex ] && [ "$claude_ok" = 1 ]; then
+  retry_label="Opus 4.8 (claude -p, max)"
+  if [ "$judge_policy" = auto ] && [ "$codex_ok" = 1 ]; then
+    log "  judge: codex failed (exit $jrc) — retrying on claude (Opus)"
+    retry_label="Opus 4.8 (claude -p, max) — codex judge unavailable"
+  fi
+  bash "$FUSION_SCRIPTS/run_claude.sh" "$JDIR/judge_prompt.md" "$JDIR/judge_out.md" max >>"$JDIR/judge.log" 2>&1
+  jrc=$?
+  [ "$jrc" = 0 ] && [ -s "$JDIR/judge_out.md" ] && { judge_ok=1; judge_cli="$retry_label"; }
+fi
+
+if [ "$judge_ok" = 1 ]; then
+  log "  judge: OK ($judge_cli)"
 else
   log "  judge: FAILED (exit $jrc) — synthesizing directly from the panel answers"
   printf '%s\n' "_(judge analysis unavailable — the synthesizer derives the answer directly from the panel answers below)_" > "$JDIR/judge_out.md"
+  judge_cli="none — judge unavailable"
 fi
 
 # ---- Step 4 — synthesize the ONE final answer --------------------------------------------------
@@ -255,16 +285,34 @@ else
 fi
 
 # ---- Decide the panel slug + degradation note --------------------------------------------------
+# Count what ACTUALLY produced output, so a dropped seat (incl. opus1 down / opus2 alive) is reported
+# rather than passed off as a clean full panel.
 note=""
-if [ "$claude_ok" = 1 ] && [ "$codex_ok" = 1 ] && [ -s "$PDIR/gpt.md" ] && [ -s "$PDIR/opus1.md" ]; then
-  slug="opus4.8x2-gpt5.5"
-elif [ "$claude_ok" = 0 ]; then
+o1=0; [ -s "$PDIR/opus1.md" ] && o1=1
+o2=0; [ -s "$PDIR/opus2.md" ] && o2=1
+gp=0; [ -s "$PDIR/gpt.md" ]   && gp=1
+n_opus=$((o1 + o2))
+if [ "$claude_ok" = 0 ]; then
   slug="gpt5.5-only"; note="claude missing — GPT-5.5-only panel + GPT-5.5 synth; install + log in to claude for the full panel"
-elif [ ! -s "$PDIR/gpt.md" ]; then
-  slug="opus4.8x2"; note="GPT-5.5 panelist dropped — Opus-only panel"
+elif [ "$codex_ok" = 0 ] || [ "$gp" = 0 ]; then
+  slug="opus4.8x2"
+  if [ "$codex_ok" = 0 ]; then
+    note="codex missing — Opus-only panel (no GPT-5.5 panelist or judge)"
+  else
+    note="GPT-5.5 panelist dropped — Opus-only panel"
+  fi
 else
   slug="opus4.8x2-gpt5.5"
 fi
+# A dropped Opus panelist (when claude is present) — surface it even if the GPT-5.5 seat survived.
+if [ "$claude_ok" = 1 ] && [ "$n_opus" -lt 2 ]; then
+  if [ "$n_opus" = 0 ]; then
+    note="${note:+$note; }both Opus panelists dropped"
+  else
+    note="${note:+$note; }one Opus panelist dropped (ran with 1 of 2 Opus seats)"
+  fi
+fi
+[ "$judge_ok" = 0 ] && note="${note:+$note; }judge seat failed — final answer synthesized WITHOUT the judge analysis"
 [ "$synth_ok" = 0 ] && note="${note:+$note; }synthesizer seat failed — final answer not produced"
 
 # ---- Step 5 — save provenance ------------------------------------------------------------------
@@ -274,7 +322,7 @@ saved=""
 if [ -n "${FUSION_NO_SAVE:-}" ]; then
   log "  FUSION_NO_SAVE set — provenance skipped (nothing written to disk)."
 else
-  saved="$(FUSION_PANEL_NOTE="$note" bash "$FUSION_SCRIPTS/save_run.sh" \
+  saved="$(FUSION_PANEL_NOTE="$note" FUSION_JUDGE_LABEL="$judge_cli" bash "$FUSION_SCRIPTS/save_run.sh" \
     "$slug" "$PDIR/question.md" "$JDIR/judge_out.md" "$final_for_record" \
     "opus-A=$PDIR/opus1.md" "opus-B=$PDIR/opus2.md" "gpt5.5=$PDIR/gpt.md" 2>>"$SDIR/save.log")"
   [ -n "$saved" ] && log "  saved: $saved"
@@ -294,7 +342,7 @@ log "Step 6 — done. Presenting result on stdout."
   echo
   echo "===== FUSION AUDIT TRAIL ====="
   echo
-  echo "Panel run: \`$slug\`   (synth: $synth_cli)"
+  echo "Panel run: \`$slug\`   (judge: $judge_cli; synth: $synth_cli)"
   [ -n "$note" ] && echo "Degradation: $note"
   [ -n "$saved" ] && echo "Provenance: $saved"
   [ -z "$saved" ] && [ -n "${FUSION_NO_SAVE:-}" ] && echo "Provenance: skipped (FUSION_NO_SAVE)"

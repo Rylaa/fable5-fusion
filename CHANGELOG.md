@@ -3,6 +3,47 @@
 All notable changes to fable5-fusion are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.1] - 2026-06-30
+
+### Fixed
+- **Judge now has a cross-family fallback (the Codex-side stability fix).** Previously the Codex runner
+  chose the judge CLI by *availability* only: if `codex` was present it ran the judge on codex, and a
+  runtime failure (non-zero exit, empty output, or `FUSION_TIMEOUT` exit 124) dropped straight to a
+  placeholder — the synthesizer then ran **without** the judge analysis while the run still looked like a
+  full panel. This asymmetry (the synth already fell back `claude`→`codex`, the judge did not) is the
+  "judge fell but synth kept going" symptom. The judge now retries on the other model family: `auto`
+  (default) tries codex (GPT-5.5, xhigh) and, on failure or absence, **automatically retries on claude
+  (Opus, max)** before any placeholder — only if *both* fail does the synth proceed judge-less.
+- **A dropped judge is no longer invisible.** When both judges fail, the run prints a `Degradation:` line
+  (`judge seat failed — final answer synthesized WITHOUT the judge analysis`) on stdout and in the
+  provenance note, instead of presenting a judge-less synthesis as a clean full-panel run.
+- **Provenance no longer hard-codes "GPT-5.5 judge".** `save_run.sh` records the judge that *actually*
+  ran via `FUSION_JUDGE_LABEL` (the runner passes it); it still defaults to `GPT-5.5 judge` for the
+  Claude Code path, whose judge is always GPT-5.5 (codex).
+- **Under-reporting fixed.** A dropped Opus panelist (e.g. `opus1` down while `opus2` + GPT-5.5 survived)
+  is now surfaced in the degradation note rather than passed off as a clean full panel.
+- **Docs: `FUSION_TIMEOUT=900` → `3600`** in all heavy-run examples (README, SKILL ×3, `commands/fusion.md`,
+  `codex/README.md`, the runner header). The default is **1800s**, so `900` *halved* the budget — the
+  opposite of the "raise it for a heavy run" advice the examples were giving.
+
+### Added
+- **`FUSION_JUDGE_CLI` knob** — `auto` (default; codex then claude), `codex` (codex only, no retry), or
+  `claude` (Opus judge from the start, skipping codex). `claude` cuts a run's Codex calls from two to one
+  (just the GPT-5.5 panelist), easing the rolling/weekly Codex cap at the cost of a same-family judge/synth.
+- **Documented the `FUSION_SERVICE_TIER=` (empty) opt-out** in `codex/README.md`: on a subscription-auth'd
+  Codex you may not be entitled to the `priority` tier, and clearing it (falling back to
+  `~/.codex/config.toml`) trades the fast tier for steadier GPT-5.5 calls. The code already supported the
+  empty value; only the docs were missing.
+- **Judge-fallback tests.** `codex/tests/fusion-runner.test.sh` grows from 29 to **55** stubbed
+  assertions: codex-judge-fail → claude-judge-retry (no degradation note, ordering preserved), both
+  judges fail → placeholder + visible note + provenance, and `FUSION_JUDGE_CLI=claude` → codex judge never
+  attempted while the GPT-5.5 panelist still runs.
+
+### Notes
+- The full-panel happy path is unchanged: when the codex judge succeeds, the run behaves exactly as
+  before. The Claude Code path (`/fable5-fusion:fusion`) is unaffected apart from the shared `save_run.sh`
+  judge-label and the doc fixes. No `--dangerously-bypass-approvals-and-sandbox` is added as a seat arg.
+
 ## [1.4.0] - 2026-06-30
 
 ### Added

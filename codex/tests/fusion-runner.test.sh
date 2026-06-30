@@ -45,25 +45,35 @@ exit 0
 EOF
 
   # run_claude.sh <prompt> <out> <effort> [model]  — record call + write a fake answer.
+  # A judge call (out=judge_out.md) is force-failed when STUB_CLAUDE_JUDGE_FAIL is set, to exercise the
+  # judge fallback/placeholder paths without real models. Non-judge calls (panelists, synth) are unaffected.
   cat > "$SCR/run_claude.sh" <<EOF
 #!/usr/bin/env bash
 echo "run_claude out=\$(basename "\$2") effort=\$3 model=\${4:-_} prompt=\$(basename "\$1")" >> "$CALLOG"
+if [ "\$(basename "\$2")" = judge_out.md ] && [ -n "\${STUB_CLAUDE_JUDGE_FAIL:-}" ]; then
+  echo "stub: claude judge forced-fail" >&2; exit 1
+fi
 printf 'FAKE-CLAUDE-ANSWER for %s\n(stub)\n' "\$(basename "\$2")" > "\$2"
 exit 0
 EOF
 
   # run_codex.sh <prompt> <out> <effort>  — record call + write a fake answer.
+  # A judge call (out=judge_out.md) is force-failed when STUB_CODEX_JUDGE_FAIL is set, to exercise the
+  # cross-family judge fallback. The GPT-5.5 *panelist* call (out=gpt.md) is unaffected.
   cat > "$SCR/run_codex.sh" <<EOF
 #!/usr/bin/env bash
 echo "run_codex out=\$(basename "\$2") effort=\$3 prompt=\$(basename "\$1")" >> "$CALLOG"
+if [ "\$(basename "\$2")" = judge_out.md ] && [ -n "\${STUB_CODEX_JUDGE_FAIL:-}" ]; then
+  echo "stub: codex judge forced-fail" >&2; exit 1
+fi
 printf 'FAKE-CODEX-ANSWER for %s\n(stub)\n' "\$(basename "\$2")" > "\$2"
 exit 0
 EOF
 
-  # save_run.sh <slug> <q> <analysis> <final> [LABEL=path...] — record slug, print a fake path on stdout.
+  # save_run.sh <slug> <q> <analysis> <final> [LABEL=path...] — record slug + judge label, print a fake path.
   cat > "$SCR/save_run.sh" <<EOF
 #!/usr/bin/env bash
-echo "save slug=\$1 note=\${FUSION_PANEL_NOTE:-} nargs=\$#" >> "$CALLOG"
+echo "save slug=\$1 note=\${FUSION_PANEL_NOTE:-} judgelabel=\${FUSION_JUDGE_LABEL:-} nargs=\$#" >> "$CALLOG"
 echo "$STUB/fake-provenance.md"
 EOF
 
@@ -138,6 +148,57 @@ rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 FUSION_SYNTH_MODEL='claud
 check "exit 0"                              "[ '$rc' = 0 ]"
 check "synth got the 1M model"              "grep -q 'run_claude out=synth_out.md effort=max model=claude-opus-4-8\\[1m\\]' '$CALLOG'"
 check "panelists did NOT get the 1M model"  "! grep -q 'run_claude out=opus1.md.*model=claude-opus-4-8\\[1m\\]' '$CALLOG'"
+rm -rf "$STUB"
+
+echo
+echo "== Test 5: codex judge fails -> claude judge retry -> judge OK, no degradation note =="
+make_stubs ready ready
+OUT="$STUB/t5"
+rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 STUB_CODEX_JUDGE_FAIL=1 bash "$RUNNER" "do the thing" >"$OUT.out" 2>"$OUT.err"; echo $?)"
+check "exit 0"                                "[ '$rc' = 0 ]"
+check "codex judge was attempted"             "grep -q 'run_codex out=judge_out.md' '$CALLOG'"
+check "claude judge retried (max)"            "grep -q 'run_claude out=judge_out.md effort=max' '$CALLOG'"
+check "audit names the Opus judge fallback"   "grep -q 'codex judge unavailable' '$OUT.out'"
+check "synth still ran after retry"           "grep -q 'run_claude out=synth_out.md effort=max' '$CALLOG'"
+check "final answer = synth output"           "grep -q 'FAKE-CLAUDE-ANSWER for synth_out.md' '$OUT.out'"
+check "NO judge-failure degradation note"     "! grep -q 'judge seat failed' '$OUT.out'"
+check "slug stays full panel"                 "grep -q 'save slug=opus4.8x2-gpt5.5 ' '$CALLOG'"
+check "provenance judge label = Opus retry"   "grep -q 'judgelabel=.*codex judge unavailable' '$CALLOG'"
+# the cross-family retry must keep judge-after-panel / synth-after-judge ordering intact
+jline="$(grep -n 'run_claude out=judge_out.md' "$CALLOG" | head -1 | cut -d: -f1)"
+sline="$(grep -n 'out=synth_out.md' "$CALLOG" | head -1 | cut -d: -f1)"
+gline="$(grep -n 'out=gpt.md' "$CALLOG" | head -1 | cut -d: -f1)"
+check "claude judge after gpt panelist"       "[ '$jline' -gt '$gline' ]"
+check "synth after the (retried) judge"       "[ '$sline' -gt '$jline' ]"
+rm -rf "$STUB"
+
+echo
+echo "== Test 6: codex judge + claude judge both fail -> placeholder + visible degradation note =="
+make_stubs ready ready
+OUT="$STUB/t6"
+rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 STUB_CODEX_JUDGE_FAIL=1 STUB_CLAUDE_JUDGE_FAIL=1 bash "$RUNNER" "do the thing" >"$OUT.out" 2>"$OUT.err"; echo $?)"
+check "exit 0"                                "[ '$rc' = 0 ]"
+check "codex judge was attempted"             "grep -q 'run_codex out=judge_out.md' '$CALLOG'"
+check "claude judge was attempted"            "grep -q 'run_claude out=judge_out.md effort=max' '$CALLOG'"
+check "judge placeholder used"                "grep -q 'judge analysis unavailable' '$OUT.out'"
+check "degradation note VISIBLE in output"    "grep -q 'judge seat failed' '$OUT.out'"
+check "note says WITHOUT the judge analysis"  "grep -q 'WITHOUT the judge analysis' '$OUT.out'"
+check "final answer still synthesized"        "grep -q 'FAKE-CLAUDE-ANSWER for synth_out.md' '$OUT.out'"
+check "provenance note carries judge failure" "grep -q 'note=.*judge seat failed' '$CALLOG'"
+rm -rf "$STUB"
+
+echo
+echo "== Test 7: FUSION_JUDGE_CLI=claude -> codex judge never attempted, Opus judges =="
+make_stubs ready ready
+OUT="$STUB/t7"
+rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 FUSION_JUDGE_CLI=claude bash "$RUNNER" "do the thing" >"$OUT.out" 2>"$OUT.err"; echo $?)"
+check "exit 0"                                "[ '$rc' = 0 ]"
+check "codex judge NEVER attempted"           "! grep -q 'run_codex out=judge_out.md' '$CALLOG'"
+check "claude judge ran (max)"                "grep -q 'run_claude out=judge_out.md effort=max' '$CALLOG'"
+check "GPT-5.5 panelist still ran via codex"  "grep -q 'run_codex out=gpt.md' '$CALLOG'"
+check "audit judge label = clean Opus"        "grep -q 'judge: Opus 4.8 (claude -p, max);' '$OUT.out'"
+check "no codex-unavailable suffix"           "! grep -q 'codex judge unavailable' '$OUT.out'"
+check "final answer = synth output"           "grep -q 'FAKE-CLAUDE-ANSWER for synth_out.md' '$OUT.out'"
 rm -rf "$STUB"
 
 echo

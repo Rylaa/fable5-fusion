@@ -8,7 +8,7 @@ Fan one prompt out to a panel of frontier models, let them answer **independentl
 then let GPT‑5.5 judge and Opus synthesize the one answer worth keeping.
 
 [![License](https://img.shields.io/badge/License-MIT-1e6feb?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.0-2ea043?style=flat-square)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.4.1-2ea043?style=flat-square)](.claude-plugin/plugin.json)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-d97757?style=flat-square)](https://claude.com/claude-code)
 [![Panel](https://img.shields.io/badge/panel-2×_Opus_4.8_+_GPT--5.5-8957e5?style=flat-square)](#-the-panel)
 [![Codex](https://img.shields.io/badge/Codex-GPT--5.5-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)
@@ -153,7 +153,7 @@ what each seat actually said. This build adds:
   wrapper kills the seat's **whole process group** (SIGTERM → 2s grace → SIGKILL) so codex/claude children
   don't linger, returns 124 only for a *real* timeout (a seat that dies of its own signal is reported as
   `128+signo`), and validates `FUSION_TIMEOUT` as a positive integer so a stray `0`/garbage value can't
-  silently disable the deadline. Raise it for deep research or a big code merge: `FUSION_TIMEOUT=900`.
+  silently disable the deadline. Raise it for deep research or a big code merge: `FUSION_TIMEOUT=3600`.
 - **🧾 Provenance record.** After synthesis, `save_run.sh` writes a timestamped
   `~/.claude/fusion-runs/<ts>_opus4.8x2-gpt5.5.md`: the **verbatim question**, every **raw panelist answer**
   (`opus-A` / `opus-B` / `gpt5.5`), the **judge analysis**, and the **final answer** — with a placeholder for

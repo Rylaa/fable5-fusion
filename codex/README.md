@@ -69,7 +69,7 @@ un-sandboxed, so no codex flags are needed:
 ```bash
 bash codex/fusion-runner.sh "your question or task"
 bash codex/fusion-runner.sh < task.txt          # task from stdin (best for very large tasks)
-FUSION_TIMEOUT=900 bash codex/fusion-runner.sh "heavy deep-research question"
+FUSION_TIMEOUT=3600 bash codex/fusion-runner.sh "heavy deep-research question"
 ```
 
 Run it from the project directory you want the panel to see — the seat runners rsync `$(pwd)` into each
@@ -112,7 +112,22 @@ throwaway copy with `bypassPermissions`. Only the orchestrator is un-sandboxed.
 ## Knobs (environment variables)
 
 - `FUSION_TIMEOUT` — per-seat budget in seconds. **Default 1800** on the Codex side (a panel at
-  max/xhigh routinely runs minutes). Exported to every seat.
+  max/xhigh routinely runs minutes). Exported to every seat. Raise it for a heavy run
+  (`FUSION_TIMEOUT=3600`); it is a *raise* above the default, not a cut.
+- `FUSION_JUDGE_CLI` — which CLI runs the **judge**. `auto` (default) tries codex (GPT-5.5, xhigh) first
+  and, if that call fails or codex is absent, **automatically retries the judge on claude (Opus, max)**
+  rather than dropping to a judge-less synth — the same cross-family fallback the synth seat already has.
+  `codex` is codex-only (no retry); `claude` runs the Opus judge **from the start**, skipping codex
+  entirely. Use `FUSION_JUDGE_CLI=claude` when you keep hitting the Codex cap: it removes the judge's
+  Codex call so a run touches Codex once (the GPT-5.5 panelist) instead of twice, leaving more of your
+  rolling/weekly window for the panelist. (The judge is then same-family with the Opus synth, so you
+  trade a little cross-family independence for steadiness — a valve, not the default.)
+- `FUSION_SERVICE_TIER` — codex processing tier for the GPT-5.5 seats. Default `priority` (the fast
+  tier). **Set it empty (`FUSION_SERVICE_TIER=`) to opt out** and fall back to your
+  `~/.codex/config.toml` default. On a subscription-auth'd Codex (ChatGPT Plus/Pro) you may not be
+  entitled to `priority`; forcing it can add failures or silent tier-coercion, so clearing it trades the
+  fast tier for steadier judge/panelist calls. Only `priority` is the confirmed fast tier — any other
+  value is silently coerced to the default (the runner warns when you set a non-`priority` value).
 - `FUSION_SYNTH_MODEL` — model id for the **synth seat only**, e.g. `claude-opus-4-8[1m]` to give the
   synthesizer the 1M-context window on a big Track-A merge (the panelists keep the standard window).
 - `FUSION_NO_SAVE=1` — skip the provenance record entirely (nothing hits disk). Use for confidential
@@ -130,6 +145,11 @@ throwaway copy with `bypassPermissions`. Only the orchestrator is un-sandboxed.
 - **Degraded panels.** If `claude` is missing, the panel runs GPT-5.5-only and GPT-5.5 also writes the
   final answer (slug `gpt5.5-only`); install + log in to `claude` for the full panel. If a single seat
   times out or errors, it is marked **absent** (never silent agreement) and the panel proceeds.
+- **Judge fallback is visible.** If the codex judge call fails, the judge is retried on claude (Opus)
+  before any placeholder (see `FUSION_JUDGE_CLI`). Only if **both** judges fail does the synth proceed
+  without a judge analysis — and that is no longer silent: the run prints a `Degradation:` line
+  (`judge seat failed — final answer synthesized WITHOUT the judge analysis`) and the provenance record
+  names the judge that actually ran (or its absence), instead of always claiming a GPT-5.5 judge.
 - **Provenance** is written to `~/.claude/fusion-runs/` (`0600`), the same place the Claude Code path
   uses. It contains the verbatim task and every raw answer in cleartext — use `FUSION_NO_SAVE=1` for
   sensitive work.

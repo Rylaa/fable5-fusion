@@ -89,7 +89,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/fusion/scripts/preflight.sh" /tmp/fusion_ques
 Show its output to the user (a rough token estimate for the fixed 5-seat panel, the per-seat timeout, and a
 Codex cap reminder), then proceed. It **never blocks** — it always exits 0, it only informs. Each seat is
 bounded by a per-seat timeout (`FUSION_TIMEOUT`, default 1800s) baked into the runners; raise it for heavy
-deep-research questions or big code merges (prefix the runner calls with `FUSION_TIMEOUT=900`).
+deep-research questions or big code merges (prefix the runner calls with `FUSION_TIMEOUT=3600`).
 
 ## Step 2 — Fan out: 2 Opus 4.8 (max) + 1 GPT-5.5 (xhigh), parallel and blind
 
@@ -125,7 +125,7 @@ Each runner wraps its CLI call in a **per-seat timeout** (`_fusion_lib.sh`'s `_r
 background task finishes — whether it completed, exited non-zero, or hit its timeout (**exit 124**). Read
 that seat's output file then. While they run, keep the user posted on which seats are still going so the run
 never looks frozen. Proceed to judging once all three have finished **or are confirmed absent**. For a heavy
-deep-research question, raise the budget before launching (`FUSION_TIMEOUT=900 bash …/run_*.sh …`) so a
+deep-research question, raise the budget before launching (`FUSION_TIMEOUT=3600 bash …/run_*.sh …`) so a
 slow-but-valid seat isn't killed.
 
 - **Opus 4.8 panelists (×2)** → `run_claude.sh` runs `claude -p --model claude-opus-4-8` against a throwaway
@@ -198,7 +198,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/fusion/scripts/run_claude.sh" "SDIR/synth_pro
 result inside its own throwaway repo copy (`run_claude.sh` works in a copy with `bypassPermissions`, so it
 can build/run/test) before emitting it; for research it derives the answer from the judge's sections. The
 synth ingests the pipeline's **largest** prompt (task + analysis + all three answers) and is bounded by
-`FUSION_TIMEOUT` too, so for a big Track-A merge raise it (e.g. `FUSION_TIMEOUT=900`) and set
+`FUSION_TIMEOUT` too, so for a big Track-A merge raise it (e.g. `FUSION_TIMEOUT=3600`) and set
 `FUSION_CLAUDE_MODEL=claude-opus-4-8[1m]` to give this seat the 1M-context window. If the synthesizer runner
 fails or times out (**exit 124**), the orchestrator falls back to writing the final answer itself from the
 judge analysis and says so.
@@ -223,8 +223,10 @@ Step 6. **Privacy:** the file holds the raw question and raw answers in cleartex
 a `0700` dir. For sensitive or confidential work, set `FUSION_NO_SAVE=1` (it skips the record entirely,
 nothing hits disk) — surface that option if the task looks confidential. Set `FUSION_PANEL_NOTE` to the
 one-line degradation note when a seat dropped (e.g. `"gpt5.5 dropped: codex timed out -> opus-only"`), or
-leave it empty for a clean run. Use a slug that reflects what **actually** ran (`opus4.8x2-gpt5.5` for the
-full panel, or e.g. `opus4.8x2` if GPT-5.5 dropped).
+leave it empty for a clean run. If the judge ran on a fallback CLI (e.g. the GPT-5.5 judge failed and you
+produced the analysis on Opus instead), set `FUSION_JUDGE_LABEL` to the judge that actually ran so the
+record doesn't mislabel it; it defaults to `GPT-5.5 judge` (the normal codex judge). Use a slug that
+reflects what **actually** ran (`opus4.8x2-gpt5.5` for the full panel, or e.g. `opus4.8x2` if GPT-5.5 dropped).
 
 ## Step 6 — Present
 

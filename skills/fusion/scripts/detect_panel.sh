@@ -32,7 +32,7 @@ if have codex; then
   codex_ok=1
 else
   echo "  codex   : NOT found — the GPT-5.5 panelist and the GPT-5.5 judge cannot run"
-  echo "  (fallback: judge falls back to the orchestrator; install + log in to codex for the full panel)"
+  echo "  (fallback: the judge runs on Opus instead; install + log in to codex for the full panel)"
   echo "CODEX=missing"
 fi
 

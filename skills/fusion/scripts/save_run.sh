@@ -17,6 +17,8 @@
 #
 # Optional env:
 #   FUSION_PANEL_NOTE  degradation note (e.g. "gpt5.5 dropped: codex timed out -> opus-only")
+#   FUSION_JUDGE_LABEL which CLI actually judged (e.g. "GPT-5.5 (codex, xhigh)" or an Opus fallback).
+#                      Default "GPT-5.5 judge" — the Claude Code path always judges with GPT-5.5 (codex).
 #   FUSION_ESTIMATE    the preflight estimate string, for the record
 #   FUSION_NO_SAVE     set to any non-empty value to SKIP provenance entirely (nothing hits disk)
 #
@@ -102,7 +104,7 @@ qfence="$(printf "%${fence_n}s" "" | tr ' ' '`')"
     emit_file "$path"
     echo
   done
-  echo "## Analysis — GPT-5.5 judge (consensus / contradictions / partial coverage / unique insights / blind spots)"
+  echo "## Analysis — ${FUSION_JUDGE_LABEL:-GPT-5.5 judge} (consensus / contradictions / partial coverage / unique insights / blind spots)"
   echo
   emit_file "$analysis_file"
   echo
