@@ -8,7 +8,7 @@ Fan one prompt out to a panel of frontier models, let them answer **independentl
 then let GPT‑5.5 judge and Opus synthesize the one answer worth keeping.
 
 [![License](https://img.shields.io/badge/License-MIT-1e6feb?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.2.0-2ea043?style=flat-square)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.3.0-2ea043?style=flat-square)](.claude-plugin/plugin.json)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-d97757?style=flat-square)](https://claude.com/claude-code)
 [![Panel](https://img.shields.io/badge/panel-2×_Opus_4.8_+_GPT--5.5-8957e5?style=flat-square)](#-the-panel)
 [![Codex](https://img.shields.io/badge/Codex-GPT--5.5-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)
@@ -102,10 +102,12 @@ final answer followed by a per‑seat audit trail.
 | Step | What happens |
 |:--:|:--|
 | **0** | `detect_panel.sh` confirms `claude` + `codex` are ready (panelists need `claude`; the GPT‑5.5 seats need `codex`). |
-| **1** | Fan out — 2× Opus 4.8 (`claude -p`, locked max) + 1× GPT‑5.5 (`codex`, xhigh), in parallel and blind, task verbatim. |
-| **2** | **Judge** — GPT‑5.5 (`codex`, `xhigh`) reads all three and produces a structured analysis. |
-| **3** | **Synthesize** — Opus 4.8 (`claude -p`, `max`) writes the final answer from that analysis. |
-| **4** | **Present** — final answer first, then the audit trail (attribution + analysis). |
+| **1** | **Preflight** — `preflight.sh` prints a non‑blocking token / latency / timeout estimate for the 5‑seat panel. |
+| **2** | Fan out — 2× Opus 4.8 (`claude -p`, locked max) + 1× GPT‑5.5 (`codex`, xhigh), in parallel and blind, task verbatim. |
+| **3** | **Judge** — GPT‑5.5 (`codex`, `xhigh`) reads all three and produces a structured analysis. |
+| **4** | **Synthesize** — Opus 4.8 (`claude -p`, `max`) writes the final answer from that analysis. |
+| **5** | **Provenance** — `save_run.sh` records question + raw answers + analysis + final to `~/.claude/fusion-runs/` (`0600`; skip with `FUSION_NO_SAVE`). |
+| **6** | **Present** — final answer first, then the audit trail (attribution + analysis). |
 
 Two tracks, chosen automatically:
 
@@ -139,6 +141,33 @@ your repo  ──(rsync copy)──►  /tmp/fusion-*.XXXX/workdir   ◄── e
 
 ---
 
+## 🛡️ Resilience & provenance
+
+A five‑subprocess panel needs guardrails so one stuck seat can't hang the run and so you can audit
+what each seat actually said. This build adds:
+
+- **⏱️ Per‑seat timeout.** Stock macOS has no `timeout`/`gtimeout`, so `_fusion_lib.sh` ships a
+  self‑contained perl fork+alarm wrapper. **Every** runner (`run_codex.sh` *and* `run_claude.sh`) wraps its
+  CLI call in it: `FUSION_TIMEOUT` (default **300s**) bounds each seat, and a seat that runs over exits
+  **124** — the orchestrator treats it as **absent** and degrades the panel instead of waiting forever. The
+  wrapper kills the seat's **whole process group** (SIGTERM → 2s grace → SIGKILL) so codex/claude children
+  don't linger, returns 124 only for a *real* timeout (a seat that dies of its own signal is reported as
+  `128+signo`), and validates `FUSION_TIMEOUT` as a positive integer so a stray `0`/garbage value can't
+  silently disable the deadline. Raise it for deep research or a big code merge: `FUSION_TIMEOUT=900`.
+- **🧾 Provenance record.** After synthesis, `save_run.sh` writes a timestamped
+  `~/.claude/fusion-runs/<ts>_opus4.8x2-gpt5.5.md`: the **verbatim question**, every **raw panelist answer**
+  (`opus-A` / `opus-B` / `gpt5.5`), the **judge analysis**, and the **final answer** — with a placeholder for
+  any absent seat, so a degraded run still produces a complete audit trail. Written **`0600`** under a
+  `0700` dir. It records raw prompts and answers in cleartext, so for sensitive work set **`FUSION_NO_SAVE=1`**
+  to skip it entirely (nothing hits disk).
+- **📋 Preflight.** `preflight.sh` prints a non‑blocking (always `exit 0`) token / latency / timeout estimate
+  for the fixed 5‑seat panel before fan‑out, so a heavy question doesn't surprise you.
+- **🔑 `gh` auth precheck.** `run_codex.sh` warns (never blocks) if `gh` is installed but unauthenticated in
+  the parent environment. The codex seat stays **sandboxed** (`-s workspace-write`) regardless — this build
+  never adds `--dangerously-bypass-approvals-and-sandbox`.
+
+---
+
 ## ⚙️ Requirements
 
 | | |
@@ -169,7 +198,10 @@ reasoning quality, served faster. Override with `FUSION_SERVICE_TIER`, or set it
 `~/.codex/config.toml` default. Note: in codex 0.139 only `priority` is the confirmed fast tier —
 unrecognized values are silently coerced to codex's default tier (the runner warns when you set a non‑`priority`
 value). The Opus seats default to `claude-opus-4-8` (Opus 4.8, standard window — ample for panelist
-prompts); override with `FUSION_CLAUDE_MODEL` (e.g. `claude-opus-4-8[1m]` for the 1M‑context variant).
+prompts); override with `FUSION_CLAUDE_MODEL` (e.g. `claude-opus-4-8[1m]` for the 1M‑context variant). Every
+seat is time‑bounded by `FUSION_TIMEOUT` (default 300s) — raise it for deep research or a big Track‑A merge
+so a slow‑but‑valid seat isn't killed at the deadline, and skip the provenance record for sensitive runs with
+`FUSION_NO_SAVE=1`.
 
 ---
 

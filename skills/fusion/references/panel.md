@@ -41,6 +41,11 @@ Every downstream seat is a locked subprocess too: the **judge** and the **synthe
 own wrapped runner at a fixed effort, so the Fusion session's own effort no longer affects output — the
 orchestrator only coordinates.
 
+Every seat is also **time-bounded**: the runner wraps it in a per-seat timeout (`FUSION_TIMEOUT`, default
+300s — see `_fusion_lib.sh`) and exits 124 if it runs over, so a stuck seat is auto-killed (the whole seat
+process group, not just the top process) and treated as **absent** — never as silent agreement — rather than
+stalling the panel. Raise `FUSION_TIMEOUT` for heavy deep-research runs that legitimately need longer.
+
 The panelists are kept separate from the two downstream seats: **GPT-5.5 (codex, xhigh) judges** all three
 (analysis only), and a separate **Claude Opus 4.8 synthesizer** (`claude -p`, max) writes the final answer.
 Because the judge and synthesizer are distinct seats — and cross model families — the synthesis reads the

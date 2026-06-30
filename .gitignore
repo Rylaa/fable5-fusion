@@ -1,0 +1,11 @@
+# OS / editor cruft
+.DS_Store
+*.swp
+*~
+
+# Fusion scratch (runtime temp dirs/files the runners write; normally under $TMPDIR, ignored here too).
+# Note: .gitignore only affects UNtracked paths — it won't un-track a scratch file already committed.
+/tmp/fusion_*
+/tmp/fusion-*
+fusion_*_out.md
+fusion_*_prompt.md

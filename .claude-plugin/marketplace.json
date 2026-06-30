@@ -3,13 +3,13 @@
   "owner": { "name": "Rylaa" },
   "metadata": {
     "description": "Multi-model fusion for Claude Code + Codex, packaged as a plugin.",
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "plugins": [
     {
       "name": "fable5-fusion",
       "description": "Panel of 2x Claude Opus 4.8 (claude -p, locked --effort max) + 1x GPT-5.5 (codex, xhigh) answers in parallel and blind; GPT-5.5 (codex, xhigh) judges; Claude Opus 4.8 (claude -p, locked max) synthesizes the final answer.",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "author": { "name": "Rylaa" },
       "source": "."
     }

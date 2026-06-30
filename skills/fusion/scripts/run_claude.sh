@@ -38,8 +38,17 @@
 # - `--disallowedTools "Task Agent"` stops a panelist from recursively spawning sub-agents / tmux teammates
 #   (a HARD CLI guard). The CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0 prefix below is only best-effort: a
 #   settings.json `env` block can re-enable agent-teams in the child, so we don't rely on it.
+#
+# Timeout: there is no `timeout`/`gtimeout` on stock macOS, so the claude run is wrapped in a
+# self-contained perl timeout helper (FUSION_TIMEOUT, default 300s — see _fusion_lib.sh). On timeout the
+# runner exits 124 so the orchestrator drops this Opus seat and degrades gracefully (for the synthesizer
+# seat, that means the orchestrator writes the final answer itself). A big Track-A merge can need more
+# than 300s — raise FUSION_TIMEOUT for those.
 
 set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/_fusion_lib.sh"
 
 prompt_file="${1:?usage: run_claude.sh <prompt_file> <output_file> [reasoning_effort] [model]}"
 output_file="${2:?usage: run_claude.sh <prompt_file> <output_file> [reasoning_effort] [model]}"
@@ -101,23 +110,32 @@ fi
 # Run headless at a LOCKED model + effort. Set BOTH the highest-precedence effort knob
 # (CLAUDE_CODE_EFFORT_LEVEL) AND the --effort flag, so the seat reaches "$effort" whichever one config would
 # otherwise resolve. --disallowedTools blocks recursive sub-agent / teammate spawning (hard guard).
+# The whole `claude -p` is wrapped in the perl timeout helper via `env` (perl execs `env`, which sets the
+# locked-effort vars then execs claude) so the locked env + the "Task Agent" guard survive the wrapper
+# untouched. The cd into the throwaway copy stays in this subshell; it exits right after, so nothing leaks.
 (
   cd "$panel_cwd" || exit 9
-  CLAUDE_CODE_EFFORT_LEVEL="$effort" \
-  CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0 \
-  CLAUDE_CODE_SPAWN_BACKEND= \
-  claude -p \
-    --model "$model" \
-    --effort "$effort" \
-    --permission-mode bypassPermissions \
-    --output-format text \
-    --disallowedTools "Task Agent" \
-    < "$prompt_file" \
-    > "$output_file" \
-    2> "$scratch/stream.log"
+  _run_with_timeout "$FUSION_TIMEOUT" env \
+    CLAUDE_CODE_EFFORT_LEVEL="$effort" \
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0 \
+    CLAUDE_CODE_SPAWN_BACKEND= \
+    claude -p \
+      --model "$model" \
+      --effort "$effort" \
+      --permission-mode bypassPermissions \
+      --output-format text \
+      --disallowedTools "Task Agent" \
+      < "$prompt_file" \
+      > "$output_file" \
+      2> "$scratch/stream.log"
 )
 status=$?
 
+if [ $status -eq 124 ]; then
+  echo "[run_claude.sh] claude timed out after ${FUSION_TIMEOUT}s (FUSION_TIMEOUT); treat this Opus seat as absent. tail of log:" >&2
+  tail -20 "$scratch/stream.log" >&2
+  exit 124
+fi
 if [ $status -ne 0 ] || [ ! -s "$output_file" ]; then
   echo "[run_claude.sh] claude exited $status; tail of log:" >&2
   tail -20 "$scratch/stream.log" >&2

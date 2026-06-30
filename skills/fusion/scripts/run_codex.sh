@@ -21,8 +21,14 @@
 # - `-c tools.web_search=true` enables web search. `--ephemeral` avoids persisting session files.
 # - `-o/--output-last-message` writes ONLY the final message — no streaming noise to parse.
 # - The throwaway copy is deleted when the process exits.
+# - There is no `timeout`/`gtimeout` on stock macOS, so the codex run is wrapped in a self-contained
+#   perl timeout helper (FUSION_TIMEOUT, default 300s — see _fusion_lib.sh). On timeout the runner
+#   exits 124 so the orchestrator drops this GPT-5.5 seat and degrades the panel gracefully.
 
 set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/_fusion_lib.sh"
 
 prompt_file="${1:?usage: run_codex.sh <prompt_file> <output_file> [reasoning_effort]}"
 output_file="${2:?usage: run_codex.sh <prompt_file> <output_file> [reasoning_effort]}"
@@ -79,6 +85,18 @@ if [ -n "$source_subdir" ]; then
   panel_cwd="$workdir/$source_subdir"
 fi
 
+# gh auth precheck (informational only — never a gate). Warns if `gh` is installed but not
+# authenticated in the PARENT environment. Note: this seat runs SANDBOXED (`-s workspace-write`), so
+# keychain-backed `gh` may be unavailable inside the sandbox regardless; web search is unaffected. We
+# deliberately do NOT add `--dangerously-bypass-approvals-and-sandbox` to "fix" this — the sandbox stays.
+if command -v gh >/dev/null 2>&1; then
+  if gh auth status --active --hostname github.com >/dev/null 2>&1; then
+    echo "[run_codex.sh] gh auth ok in parent environment (note: codex is sandboxed; the seat can't use keychain-backed gh)" >&2
+  else
+    echo "[run_codex.sh] warning: gh is installed but not authenticated in the parent environment (gh auth status failed)" >&2
+  fi
+fi
+
 # Build the codex args; only add service_tier when non-empty (empty = use config.toml default).
 tier_args=()
 if [ -n "$service_tier" ]; then
@@ -89,7 +107,10 @@ if [ -n "$service_tier" ]; then
     echo "[run_codex.sh] WARNING: FUSION_SERVICE_TIER='$service_tier' is not the known fast tier 'priority'; codex may fall back to its default tier (fast mode off)." >&2
 fi
 
-codex exec \
+# Wrap in the per-seat timeout (FUSION_TIMEOUT, default 300s). The array/flag expansion happens in bash
+# before perl sees the words, so service_tier / sandbox / effort are all preserved exactly. The caller's
+# redirections below apply to the wrapped codex process: stdin from the prompt file, stdout+stderr to the log.
+_run_with_timeout "$FUSION_TIMEOUT" codex exec \
   --skip-git-repo-check \
   --ephemeral \
   --cd "$panel_cwd" \
@@ -100,8 +121,13 @@ codex exec \
   -o "$output_file" \
   - < "$prompt_file" \
   > "$scratch/stream.log" 2>&1
-
 status=$?
+
+if [ $status -eq 124 ]; then
+  echo "[run_codex.sh] codex timed out after ${FUSION_TIMEOUT}s (FUSION_TIMEOUT); treat this GPT-5.5 seat as absent. tail of log:" >&2
+  tail -20 "$scratch/stream.log" >&2
+  exit 124
+fi
 if [ $status -ne 0 ] || [ ! -s "$output_file" ]; then
   echo "[run_codex.sh] codex exited $status; tail of log:" >&2
   tail -20 "$scratch/stream.log" >&2

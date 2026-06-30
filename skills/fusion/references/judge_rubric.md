@@ -21,8 +21,8 @@ code, fold the reasoning in as brief rationale.
 ## Judge (GPT-5.5 via codex) — produce the analysis
 
 Read every panelist response in full and attribute by seat ("Opus run 1", "Opus run 2", "GPT-5.5") so
-the user can trace every decision. A panelist that failed or was dropped is **absent**, never silent
-agreement.
+the user can trace every decision. A panelist that failed, timed out (its runner exited 124), or was
+dropped is **absent**, never silent agreement.
 
 ### Track A — analyze the candidates (you don't run them; the synthesizer does)
 For each candidate, build a real model of it: its approach, what it gets right, where it looks buggy,

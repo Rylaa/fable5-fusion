@@ -3,6 +3,55 @@
 All notable changes to fable5-fusion are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] - 2026-06-30
+
+Operational hardening ported from upstream ([duolahypercho/fusion-fable](https://github.com/duolahypercho/fusion-fable)),
+adapted to this build's fixed 5-seat panel — **without** touching the locked-max panelists, the cross-family
+GPT-5.5-judge / Opus-synth split, the priority service tier, or the codex sandbox.
+
+### Added
+- **Per-seat timeout.** New `_fusion_lib.sh` provides `_run_with_timeout` — a self-contained perl fork+alarm
+  wrapper, since stock macOS ships no `timeout`/`gtimeout`. **Both** `run_codex.sh` and `run_claude.sh` now
+  wrap their CLI call in it: `FUSION_TIMEOUT` (default 300s) bounds every reasoning seat, and a seat that runs
+  over exits **124** so the orchestrator treats it as absent and degrades the panel instead of hanging. The
+  wrapper kills the seat's **whole process group** (SIGTERM → 2s grace → SIGKILL), so codex/claude child
+  processes don't survive a timeout; it returns 124 **only** for a real timeout (a seat that dies of its own
+  signal is reported as `128+signo`, not mis-flagged as a timeout); `FUSION_TIMEOUT` is validated as a
+  positive integer (anything else falls back to 300 — a 0/garbage value can't silently disable the deadline);
+  and if `perl` is somehow absent it **fails fast** (exit 125) rather than running the seat unbounded. The
+  codex seat keeps `-s workspace-write` + `service_tier=priority`; the claude seats keep locked `--effort max`
+  + `--disallowedTools "Task Agent"`.
+- **Provenance recording.** New `save_run.sh` writes a timestamped `~/.claude/fusion-runs/<ts>_<slug>.md` per
+  run — the verbatim question + all raw panelist answers (`opus-A` / `opus-B` / `gpt5.5`) + the judge analysis
+  + the final answer, with placeholders for any absent seat. Written `0600` under a `0700` dir (a pre-existing
+  runs dir is tightened to `0700`); the verbatim question is wrapped in a backtick fence sized longer than any
+  backtick run it contains, so a question with ``` in it can't corrupt the audit file. Opt out entirely with
+  `FUSION_NO_SAVE=1`.
+- **Preflight.** New `preflight.sh` prints a non-blocking (always `exit 0`, even with no argument or a missing
+  file) token / latency / timeout estimate for the fixed 5-seat panel before fan-out.
+- **`gh auth` precheck** in `run_codex.sh`: warns (never blocks) if `gh` is installed but unauthenticated in
+  the parent environment. The codex seat stays sandboxed — this build does **not** add
+  `--dangerously-bypass-approvals-and-sandbox`.
+- **`.gitignore`** for OS/editor cruft and Fusion scratch.
+
+### Changed
+- SKILL flow renumbered to Step 0 verify → **1 preflight** → 2 fan out → 3 judge → 4 synthesize →
+  **5 save provenance** → 6 present. The background-task "wait for notification" semantics now spell out that
+  a seat hitting its `FUSION_TIMEOUT` (exit 124), exiting non-zero, or leaving an empty file is **absent** —
+  judge/synthesize with the seats you have. `references/panel.md` and `references/judge_rubric.md` document the
+  timeout/absent semantics.
+
+### Fixed
+- **License/author consistency.** The project is now attributed to **Rylaa** across `LICENSE` and
+  `.claude-plugin/plugin.json` (both previously said "yusuf"), matching `README.md` and
+  `.claude-plugin/marketplace.json`.
+
+### Not ported (out of scope)
+- All Gemini seats (`run_gemini.sh`, `agy_capture.py`, `_pty_run.py`, the Gemini slugs/commands) and the
+  `--dangerously-bypass-approvals-and-sandbox` codex flag from upstream are deliberately excluded. The codex
+  sandbox, the locked-max Opus panelists, and the cross-family GPT-5.5-judge / Opus-synth pipeline are
+  preserved.
+
 ## [1.2.0] - 2026-06-21
 
 Swap the judge and synthesizer model families.
