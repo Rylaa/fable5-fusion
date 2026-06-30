@@ -113,32 +113,61 @@ fi
 # The whole `claude -p` is wrapped in the perl timeout helper via `env` (perl execs `env`, which sets the
 # locked-effort vars then execs claude) so the locked env + the "Task Agent" guard survive the wrapper
 # untouched. The cd into the throwaway copy stays in this subshell; it exits right after, so nothing leaks.
-(
-  cd "$panel_cwd" || exit 9
-  _run_with_timeout "$FUSION_TIMEOUT" env \
-    CLAUDE_CODE_EFFORT_LEVEL="$effort" \
-    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0 \
-    CLAUDE_CODE_SPAWN_BACKEND= \
-    claude -p \
-      --model "$model" \
-      --effort "$effort" \
-      --permission-mode bypassPermissions \
-      --output-format text \
-      --disallowedTools "Task Agent" \
-      < "$prompt_file" \
-      > "$output_file" \
-      2> "$scratch/stream.log"
-)
-status=$?
+# Rate-limit-aware retry. Under a saturated Anthropic rate-limit pool (many concurrent `claude -p` seats —
+# e.g. overlapping Fusion panels), a seat can get 429 ("Server is temporarily limiting requests"); the CLI
+# retries silently for tens of seconds, then the session dies with EMPTY output. That is NOT our timeout
+# (exit 124) and NOT a crash — it is recoverable by backing off until the pool drains. So we retry ONLY on a
+# rate-limit signature in the seat's stderr; a real timeout (124) or a non-rate-limit failure is never
+# retried. Tunables: FUSION_SEAT_RETRIES (extra attempts, default 2), FUSION_SEAT_RETRY_BACKOFF (first
+# backoff seconds, default 20; grows x3 each retry, + jitter so concurrent seats don't retry in lockstep).
+# Set FUSION_SEAT_RETRIES=0 to disable retries; a clean (non-rate-limited) run loops exactly once.
+attempts="${FUSION_SEAT_RETRIES:-2}"
+backoff="${FUSION_SEAT_RETRY_BACKOFF:-20}"
+try=0
+while :; do
+  rm -f "$output_file"
+  (
+    cd "$panel_cwd" || exit 9
+    _run_with_timeout "$FUSION_TIMEOUT" env \
+      CLAUDE_CODE_EFFORT_LEVEL="$effort" \
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0 \
+      CLAUDE_CODE_SPAWN_BACKEND= \
+      claude -p \
+        --model "$model" \
+        --effort "$effort" \
+        --permission-mode bypassPermissions \
+        --output-format text \
+        --disallowedTools "Task Agent" \
+        < "$prompt_file" \
+        > "$output_file" \
+        2> "$scratch/stream.log"
+  )
+  status=$?
 
-if [ $status -eq 124 ]; then
-  echo "[run_claude.sh] claude timed out after ${FUSION_TIMEOUT}s (FUSION_TIMEOUT); treat this Opus seat as absent. tail of log:" >&2
-  tail -20 "$scratch/stream.log" >&2
-  exit 124
-fi
-if [ $status -ne 0 ] || [ ! -s "$output_file" ]; then
-  echo "[run_claude.sh] claude exited $status; tail of log:" >&2
+  # A real timeout (the seat exceeded FUSION_TIMEOUT): that was intentional — never retry it.
+  if [ $status -eq 124 ]; then
+    echo "[run_claude.sh] claude timed out after ${FUSION_TIMEOUT}s (FUSION_TIMEOUT); treat this Opus seat as absent. tail of log:" >&2
+    tail -20 "$scratch/stream.log" >&2
+    exit 124
+  fi
+  # Success: clean exit AND a non-empty answer.
+  if [ $status -eq 0 ] && [ -s "$output_file" ]; then
+    [ "$try" -gt 0 ] && echo "[run_claude.sh] recovered after $try retr$([ "$try" = 1 ] && echo y || echo ies)." >&2
+    echo "[run_claude.sh] ok -> $output_file  (model=$model, effort=$effort)"
+    exit 0
+  fi
+  # Rate-limit signature in the seat's stderr + retries left? back off (with jitter) and try again.
+  if [ "$try" -lt "$attempts" ] && grep -qiE 'rate.?limit|temporarily limiting|overloaded|server is busy|too many requests|429|usage limit' "$scratch/stream.log" 2>/dev/null; then
+    try=$((try + 1))
+    jitter=0; [ "$backoff" -gt 0 ] && jitter=$(( ${RANDOM:-0} % 8 ))   # 0-7s so concurrent seats desync
+    wait_s=$(( backoff + jitter ))
+    echo "[run_claude.sh] seat rate-limited (attempt $try/$attempts) — backing off ${wait_s}s then retrying." >&2
+    [ "$wait_s" -gt 0 ] && sleep "$wait_s"
+    backoff=$(( backoff * 3 ))
+    continue
+  fi
+  # Real failure: non-rate-limit crash, empty output with no rate-limit signature, or retries exhausted.
+  echo "[run_claude.sh] claude exited $status (no recoverable rate-limit signature, or retries exhausted); tail of log:" >&2
   tail -20 "$scratch/stream.log" >&2
   exit 1
-fi
-echo "[run_claude.sh] ok -> $output_file  (model=$model, effort=$effort)"
+done

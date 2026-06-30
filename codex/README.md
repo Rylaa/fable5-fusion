@@ -153,3 +153,18 @@ throwaway copy with `bypassPermissions`. Only the orchestrator is un-sandboxed.
 - **Provenance** is written to `~/.claude/fusion-runs/` (`0600`), the same place the Claude Code path
   uses. It contains the verbatim task and every raw answer in cleartext — use `FUSION_NO_SAVE=1` for
   sensitive work.
+
+
+## Reliability under rate limits (v1.4.2)
+
+If you see two Opus panelists stop early with empty output while GPT-5.5 runs fine, that is the shared
+Anthropic rate-limit pool (429), not the per-seat timeout. Mitigations, in order of impact:
+
+- Don't run overlapping Fusion panels, and don't immediately re-fire a run that just dropped — both pile
+  onto the same pool.
+- The runner already runs the two Opus seats **serially** by default (`FUSION_OPUS_SERIAL=1`) and **retries**
+  a rate-limited seat (`FUSION_SEAT_RETRIES=2`, backoff + jitter); a real timeout or a genuine crash is not
+  retried.
+- Under a tight cap, add `FUSION_OPUS_SEATS=1` (a single Opus panelist) and/or `FUSION_JUDGE_CLI=claude`
+  (skip the codex judge) to shrink each run's footprint. `FUSION_OPUS_SERIAL=0` restores the faster parallel
+  launch when the pool is idle.

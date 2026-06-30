@@ -8,7 +8,7 @@ Fan one prompt out to a panel of frontier models, let them answer **independentl
 then let GPT‑5.5 judge and Opus synthesize the one answer worth keeping.
 
 [![License](https://img.shields.io/badge/License-MIT-1e6feb?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.1-2ea043?style=flat-square)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.4.2-2ea043?style=flat-square)](.claude-plugin/plugin.json)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-d97757?style=flat-square)](https://claude.com/claude-code)
 [![Panel](https://img.shields.io/badge/panel-2×_Opus_4.8_+_GPT--5.5-8957e5?style=flat-square)](#-the-panel)
 [![Codex](https://img.shields.io/badge/Codex-GPT--5.5-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)

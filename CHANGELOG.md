@@ -3,6 +3,44 @@
 All notable changes to fable5-fusion are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.2] - 2026-07-01
+
+Stabilize the panel when Opus seats are dropped by the shared Anthropic rate-limit pool (most visible as
+"two Opus panelists stopped at ~44s with empty output while GPT-5.5 ran fine"). That is not the per-seat
+timeout (exit 124) and not a hook — under several concurrent/overlapping `claude -p` seats (e.g. two panels
+plus the interactive session) the pool returns 429, the CLI retries silently for tens of seconds, then the
+seat dies empty; codex (a different provider) is unaffected.
+
+### Added
+- **Rate-limit-aware seat retry** in `run_claude.sh`: a seat that fails with a rate-limit signature
+  (`temporarily limiting` / `429` / `overloaded` / `usage limit` …) backs off (exponential + jitter) and
+  retries. A real timeout (124) or a non-rate-limit crash is never retried. Knobs: `FUSION_SEAT_RETRIES`
+  (default 2; 0 disables), `FUSION_SEAT_RETRY_BACKOFF` (default 20s). Covers the synth seat too (same file).
+- **Serial Opus launch** (`FUSION_OPUS_SERIAL`, default 1): the two Opus seats run one-at-a-time so a panel
+  no longer bursts two concurrent Anthropic sessions; GPT-5.5 (codex, separate provider) still runs in
+  parallel for free. `FUSION_OPUS_SERIAL=0` restores parallel launch.
+- **`FUSION_OPUS_SEATS`** (1 or 2, default 2): run a single Opus panelist under a tight cap; the absent
+  second seat is not misreported as a drop.
+
+### Fixed
+- **Cross-family synth fallback (real bug):** if the Opus synth seat fails AT RUNTIME (e.g. rate-limited)
+  and codex is healthy, the synthesis now retries on GPT-5.5 — the symmetric twin of the v1.4.1 judge
+  fallback. Previously synth fell back to codex only when `claude` was ABSENT, so a runtime Opus failure
+  (common when both Opus panelists also dropped) lost the merged final answer.
+- **Accurate panel slug from actual output:** two dropped Opus seats + a surviving GPT now read as
+  `gpt5.5-only` (and one as `opus4.8x1-gpt5.5`) instead of a clean `opus4.8x2-gpt5.5`.
+- The serial collect path waits each seat's PID exactly once (cached), avoiding a double-`wait` that would
+  return 127 in bash and corrupt a seat's reported status.
+
+### Notes
+- The biggest real-world lever is behavioral: don't launch overlapping Fusion panels, and don't immediately
+  re-fire a run that just dropped — that piles more onto the same pool. Under a heavy cap, `FUSION_JUDGE_CLI=claude`
+  (v1.4.1) plus `FUSION_OPUS_SEATS=1` cut the per-run Anthropic draw further.
+
+Tested: `codex/tests/fusion-runner.test.sh` is now 77/0 (55 original assertions unchanged; 22 new covering
+serial launch, single-seat mode, cross-family synth fallback, slug accuracy, and the rate-limit retry /
+no-retry-on-real-crash paths).
+
 ## [1.4.1] - 2026-06-30
 
 ### Fixed

@@ -50,9 +50,11 @@ EOF
   cat > "$SCR/run_claude.sh" <<EOF
 #!/usr/bin/env bash
 echo "run_claude out=\$(basename "\$2") effort=\$3 model=\${4:-_} prompt=\$(basename "\$1")" >> "$CALLOG"
-if [ "\$(basename "\$2")" = judge_out.md ] && [ -n "\${STUB_CLAUDE_JUDGE_FAIL:-}" ]; then
-  echo "stub: claude judge forced-fail" >&2; exit 1
-fi
+case "\$(basename "\$2")" in
+  judge_out.md) [ -n "\${STUB_CLAUDE_JUDGE_FAIL:-}" ] && { echo "stub: claude judge forced-fail" >&2; exit 1; } ;;
+  synth_out.md) [ -n "\${STUB_CLAUDE_SYNTH_FAIL:-}" ] && { echo "stub: claude synth forced-fail" >&2; exit 1; } ;;
+  opus1.md|opus2.md) [ -n "\${STUB_CLAUDE_PANEL_FAIL:-}" ] && { echo "stub: claude panelist forced-fail" >&2; exit 1; } ;;
+esac
 printf 'FAKE-CLAUDE-ANSWER for %s\n(stub)\n' "\$(basename "\$2")" > "\$2"
 exit 0
 EOF
@@ -200,6 +202,83 @@ check "audit judge label = clean Opus"        "grep -q 'judge: Opus 4.8 (claude 
 check "no codex-unavailable suffix"           "! grep -q 'codex judge unavailable' '$OUT.out'"
 check "final answer = synth output"           "grep -q 'FAKE-CLAUDE-ANSWER for synth_out.md' '$OUT.out'"
 rm -rf "$STUB"
+
+echo
+echo "== Test 8: FUSION_OPUS_SEATS=1 -> single Opus seat, slug opus4.8x1-gpt5.5, no phantom drop =="
+make_stubs ready ready
+OUT="$STUB/t8"
+rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 FUSION_OPUS_SEATS=1 bash "$RUNNER" "do the thing" >"$OUT.out" 2>"$OUT.err"; echo $?)"
+check "exit 0"                          "[ '$rc' = 0 ]"
+check "opus1 launched"                  "grep -q 'run_claude out=opus1.md' '$CALLOG'"
+check "opus2 NOT launched"              "! grep -q 'run_claude out=opus2.md' '$CALLOG'"
+check "GPT-5.5 panelist ran"            "grep -q 'run_codex out=gpt.md' '$CALLOG'"
+check "slug = opus4.8x1-gpt5.5"         "grep -q 'save slug=opus4.8x1-gpt5.5 ' '$CALLOG'"
+check "no phantom 'dropped' note"       "! grep -qi 'dropped' '$CALLOG'"
+rm -rf "$STUB"
+
+echo
+echo "== Test 9: Opus synth fails at runtime -> codex synth fallback (cross-family) =="
+make_stubs ready ready
+OUT="$STUB/t9"
+rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 STUB_CLAUDE_SYNTH_FAIL=1 bash "$RUNNER" "do the thing" >"$OUT.out" 2>"$OUT.err"; echo $?)"
+check "exit 0"                              "[ '$rc' = 0 ]"
+check "Opus synth attempted"                "grep -q 'run_claude out=synth_out.md' '$CALLOG'"
+check "codex synth fallback attempted"      "grep -q 'run_codex out=synth_out.md' '$CALLOG'"
+check "final answer = codex synth output"   "grep -q 'FAKE-CODEX-ANSWER for synth_out.md' '$OUT.out'"
+check "synth NOT reported as failed"        "! grep -q 'synthesizer seat failed' '$OUT.out'"
+rm -rf "$STUB"
+
+echo
+echo "== Test 10: both Opus panelists drop + GPT survives -> slug gpt5.5-only =="
+make_stubs ready ready
+OUT="$STUB/t10"
+rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 STUB_CLAUDE_PANEL_FAIL=1 bash "$RUNNER" "do the thing" >"$OUT.out" 2>"$OUT.err"; echo $?)"
+check "exit 0 (GPT carried the panel)"  "[ '$rc' = 0 ]"
+check "opus1 attempted"                 "grep -q 'run_claude out=opus1.md' '$CALLOG'"
+check "opus2 attempted (serial)"        "grep -q 'run_claude out=opus2.md' '$CALLOG'"
+check "slug = gpt5.5-only"              "grep -q 'save slug=gpt5.5-only ' '$CALLOG'"
+check "drop surfaced in note"           "grep -qi 'all Opus panelists dropped' '$CALLOG'"
+rm -rf "$STUB"
+
+echo
+echo "== Test 11: run_claude.sh rate-limit retry then recover (real script, fake claude) =="
+RCL="$(cd "$(dirname "$RUNNER")/../skills/fusion/scripts" && pwd)/run_claude.sh"
+T11="$(mktemp -d "${TMPDIR:-/tmp}/fusion-rc11.XXXXXX")"
+mkdir -p "$T11/bin" "$T11/work"; cnt="$T11/attempts"; : > "$cnt"
+cat > "$T11/bin/claude" <<EOF
+#!/usr/bin/env bash
+echo x >> "$cnt"
+if [ "\$(wc -l < "$cnt" | tr -d ' ')" -lt 2 ]; then
+  echo "API Error: 429 Server is temporarily limiting requests" >&2; exit 1
+fi
+printf 'RECOVERED-ANSWER\n'; exit 0
+EOF
+chmod +x "$T11/bin/claude"; printf 'tiny task\n' > "$T11/prompt.md"
+( cd "$T11/work" && PATH="$T11/bin:$PATH" FUSION_SEAT_RETRY_BACKOFF=0 FUSION_SEAT_RETRIES=2 \
+    bash "$RCL" "$T11/prompt.md" "$T11/out.md" max >/dev/null 2>"$T11/err" )
+rc11=$?; n11="$(wc -l < "$cnt" | tr -d ' ')"
+check "run_claude exit 0 after retry"   "[ '$rc11' = 0 ]"
+check "made exactly 2 claude attempts"  "[ '$n11' = 2 ]"
+check "recovered answer written"        "grep -q 'RECOVERED-ANSWER' '$T11/out.md'"
+check "logged a rate-limit retry"       "grep -qi 'rate-limited' '$T11/err'"
+rm -rf "$T11"
+
+echo
+echo "== Test 12: run_claude.sh does NOT retry a non-rate-limit crash =="
+T12="$(mktemp -d "${TMPDIR:-/tmp}/fusion-rc12.XXXXXX")"
+mkdir -p "$T12/bin" "$T12/work"; cnt2="$T12/attempts"; : > "$cnt2"
+cat > "$T12/bin/claude" <<EOF
+#!/usr/bin/env bash
+echo x >> "$cnt2"
+echo "TypeError: something genuinely broke" >&2; exit 1
+EOF
+chmod +x "$T12/bin/claude"; printf 'tiny task\n' > "$T12/prompt.md"
+( cd "$T12/work" && PATH="$T12/bin:$PATH" FUSION_SEAT_RETRY_BACKOFF=0 FUSION_SEAT_RETRIES=2 \
+    bash "$RCL" "$T12/prompt.md" "$T12/out.md" max >/dev/null 2>"$T12/err" )
+rc12=$?; n12="$(wc -l < "$cnt2" | tr -d ' ')"
+check "run_claude exit 1 (real failure)"  "[ '$rc12' = 1 ]"
+check "made exactly 1 attempt (no retry)" "[ '$n12' = 1 ]"
+rm -rf "$T12"
 
 echo
 echo "================================"

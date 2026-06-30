@@ -42,6 +42,12 @@
 # KNOBS (env)
 #   FUSION_SCRIPTS          override the plugin scripts dir (else auto-resolved).
 #   FUSION_TIMEOUT          per-seat budget, seconds (default 1800). Exported to every seat.
+#   FUSION_OPUS_SERIAL      run the 2 Opus seats one-at-a-time (default 1) instead of both at once, so the
+#                           shared Anthropic rate-limit pool isn't saturated by a burst. 0 = parallel (faster).
+#   FUSION_OPUS_SEATS       how many Opus panelists to run: 2 (default) or 1 (degraded, under a tight cap).
+#   FUSION_SEAT_RETRIES     run_claude.sh retries on a rate-limit signature (default 2; 0 disables): a
+#                           rate-limited seat backs off (FUSION_SEAT_RETRY_BACKOFF, default 20s, +jitter) and
+#                           retries — a real timeout (124) or a non-rate-limit crash is never retried.
 #   FUSION_JUDGE_CLI        which CLI judges: auto (default; codex then claude), codex (codex only),
 #                           or claude (Opus judge from the start — cuts codex contention under a heavy cap).
 #   FUSION_SYNTH_MODEL      model id for the synth seat only (e.g. claude-opus-4-8[1m] for the
@@ -145,19 +151,37 @@ bash "$FUSION_SCRIPTS/preflight.sh" "$PDIR/question.md" 2>&1 | sed 's/^/[fusion]
 # Seats: 2x Opus 4.8 (run_claude.sh max) when claude is present, + 1x GPT-5.5 (run_codex.sh xhigh)
 # when codex is present. Each is its own background process; we poll for live progress, then collect.
 log "Step 2 — fanning out the panel (per-seat budget ${FUSION_TIMEOUT}s)..."
-labels=(); pids=(); files=()
+labels=(); pids=(); files=(); rc_cap=()
 launch() {  # launch <label> <runner> <out> <effort>
   local label="$1" runner="$2" out="$3" effort="$4"
   bash "$FUSION_SCRIPTS/$runner" "$PDIR/prompt.md" "$out" "$effort" >>"$PDIR/seat.log" 2>&1 &
-  labels+=("$label"); pids+=("$!"); files+=("$out")
+  labels+=("$label"); pids+=("$!"); files+=("$out"); rc_cap+=("")
   log "  launched $label (pid $!)"
 }
-if [ "$claude_ok" = 1 ]; then
-  launch "Opus run 1" run_claude.sh "$PDIR/opus1.md" max
-  launch "Opus run 2" run_claude.sh "$PDIR/opus2.md" max
-fi
+reap() {  # reap <idx> — wait the seat ONCE and cache its exit code; idempotent (safe to call again).
+  local idx="$1"                            # NB: a 2nd `wait` on a reaped PID returns 127 in bash and would
+  [ -n "${rc_cap[$idx]}" ] && return 0      # corrupt the seat's real status — so cache it, never re-wait.
+  wait "${pids[$idx]}"; rc_cap[$idx]=$?
+}
+# GPT-5.5 (codex) is a SEPARATE provider (OpenAI) — it never touches the Anthropic rate-limit pool, so it
+# always runs in parallel. The two Opus seats DO share one Anthropic pool; launching both at once is what
+# saturates it under load (overlapping panels) and gets them killed together. So by default run the Opus
+# seats SERIALLY (FUSION_OPUS_SERIAL=1): Opus run 2 starts only after Opus run 1 finishes — one Anthropic
+# seat at a time, while GPT-5.5 overlaps for free. FUSION_OPUS_SERIAL=0 launches both at once (faster, but
+# reintroduces the burst). FUSION_OPUS_SEATS=1 runs a single Opus seat (degraded panel under a tight cap).
+opus_seats="${FUSION_OPUS_SEATS:-2}"; case "$opus_seats" in 1|2) ;; *) opus_seats=2 ;; esac
 if [ "$codex_ok" = 1 ]; then
   launch "GPT-5.5"    run_codex.sh  "$PDIR/gpt.md"   xhigh
+fi
+if [ "$claude_ok" = 1 ]; then
+  launch "Opus run 1" run_claude.sh "$PDIR/opus1.md" max
+  if [ "$opus_seats" -ge 2 ]; then
+    if [ "${FUSION_OPUS_SERIAL:-1}" = 1 ]; then
+      reap "$(( ${#pids[@]} - 1 ))"          # finish Opus run 1 (cache its rc) before starting Opus run 2
+      log "  Opus run 1 finished (serial) — launching Opus run 2"
+    fi
+    launch "Opus run 2" run_claude.sh "$PDIR/opus2.md" max
+  fi
 fi
 
 # Poll for completions so the foreground run streams progress instead of looking frozen.
@@ -186,7 +210,7 @@ done
 # Collect real exit codes and report each seat.
 i=0; n_ok=0
 while [ "$i" -lt "$n" ]; do
-  wait "${pids[$i]}"; rc=$?
+  reap "$i"; rc="${rc_cap[$i]}"
   if [ "$rc" = 0 ] && [ -s "${files[$i]}" ]; then
     log "  ${labels[$i]}: OK ($(wc -c < "${files[$i]}" | tr -d ' ') bytes)"
     n_ok=$((n_ok+1))
@@ -276,6 +300,16 @@ else
   synth_cli="GPT-5.5 (codex, xhigh) — Opus unavailable"
 fi
 src=$?
+# Cross-family synth fallback: if the Opus synth seat fails AT RUNTIME (e.g. rate-limited under load) and
+# codex is healthy, retry the synthesis on GPT-5.5 — the symmetric twin of the judge's cross-family fallback
+# (v1.4.1). Previously synth fell back to codex only when claude was ABSENT, so a runtime Opus failure (the
+# common case when both Opus panelists also dropped to the same rate-limit pool) lost the merged answer.
+if { [ "$src" != 0 ] || [ ! -s "$SDIR/synth_out.md" ]; } && [ "$claude_ok" = 1 ] && [ "$codex_ok" = 1 ]; then
+  log "  synth: Opus failed (exit $src) — retrying synth on codex (GPT-5.5), cross-family"
+  bash "$FUSION_SCRIPTS/run_codex.sh" "$SDIR/synth_prompt.md" "$SDIR/synth_out.md" xhigh >>"$SDIR/synth.log" 2>&1
+  src=$?
+  synth_cli="GPT-5.5 (codex, xhigh) — Opus synth unavailable"
+fi
 if [ "$src" = 0 ] && [ -s "$SDIR/synth_out.md" ]; then
   log "  synth: OK ($synth_cli)"
   synth_ok=1
@@ -302,14 +336,21 @@ elif [ "$codex_ok" = 0 ] || [ "$gp" = 0 ]; then
     note="GPT-5.5 panelist dropped — Opus-only panel"
   fi
 else
-  slug="opus4.8x2-gpt5.5"
+  # claude + codex both present and GPT survived: name the slug by how many Opus seats ACTUALLY produced,
+  # so two dropped Opus seats read as `gpt5.5-only`, not a clean full panel.
+  case "$n_opus" in
+    2) slug="opus4.8x2-gpt5.5" ;;
+    1) slug="opus4.8x1-gpt5.5" ;;
+    *) slug="gpt5.5-only" ;;
+  esac
 fi
-# A dropped Opus panelist (when claude is present) — surface it even if the GPT-5.5 seat survived.
-if [ "$claude_ok" = 1 ] && [ "$n_opus" -lt 2 ]; then
+# A dropped Opus panelist — measured against how many we INTENDED to launch (opus_seats), so running
+# FUSION_OPUS_SEATS=1 on purpose is NOT misreported as a drop. Surfaced even if the GPT-5.5 seat survived.
+if [ "$claude_ok" = 1 ] && [ "$n_opus" -lt "$opus_seats" ]; then
   if [ "$n_opus" = 0 ]; then
-    note="${note:+$note; }both Opus panelists dropped"
+    note="${note:+$note; }all Opus panelists dropped (ran with 0 of $opus_seats Opus seats)"
   else
-    note="${note:+$note; }one Opus panelist dropped (ran with 1 of 2 Opus seats)"
+    note="${note:+$note; }$(( opus_seats - n_opus )) of $opus_seats Opus panelists dropped"
   fi
 fi
 [ "$judge_ok" = 0 ] && note="${note:+$note; }judge seat failed — final answer synthesized WITHOUT the judge analysis"
