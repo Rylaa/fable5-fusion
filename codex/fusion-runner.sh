@@ -73,6 +73,7 @@ log() { printf '%s\n' "[fusion] $*" >&2; }
 # run_claude.sh / run_codex.sh inherit it. User can override by setting FUSION_TIMEOUT in the env.
 export FUSION_TIMEOUT="${FUSION_TIMEOUT:-1800}"
 PROGRESS_INTERVAL="${FUSION_PROGRESS_INTERVAL:-20}"
+case "$PROGRESS_INTERVAL" in ''|*[!0-9]*) PROGRESS_INTERVAL=20 ;; *) [ "$PROGRESS_INTERVAL" -ge 1 ] 2>/dev/null || PROGRESS_INTERVAL=20 ;; esac
 
 # ---- Resolve the plugin scripts + references (first match wins) --------------------------------
 FUSION_SCRIPTS="${FUSION_SCRIPTS:-}"
@@ -151,17 +152,31 @@ bash "$FUSION_SCRIPTS/preflight.sh" "$PDIR/question.md" 2>&1 | sed 's/^/[fusion]
 # Seats: 2x Opus 4.8 (run_claude.sh max) when claude is present, + 1x GPT-5.5 (run_codex.sh xhigh)
 # when codex is present. Each is its own background process; we poll for live progress, then collect.
 log "Step 2 — fanning out the panel (per-seat budget ${FUSION_TIMEOUT}s)..."
-labels=(); pids=(); files=(); rc_cap=()
+labels=(); pids=(); files=(); rc_cap=(); starts=()
 launch() {  # launch <label> <runner> <out> <effort>
   local label="$1" runner="$2" out="$3" effort="$4"
   bash "$FUSION_SCRIPTS/$runner" "$PDIR/prompt.md" "$out" "$effort" >>"$PDIR/seat.log" 2>&1 &
-  labels+=("$label"); pids+=("$!"); files+=("$out"); rc_cap+=("")
+  labels+=("$label"); pids+=("$!"); files+=("$out"); rc_cap+=(""); starts+=("$(date +%s)")
   log "  launched $label (pid $!)"
 }
 reap() {  # reap <idx> — wait the seat ONCE and cache its exit code; idempotent (safe to call again).
   local idx="$1"                            # NB: a 2nd `wait` on a reaped PID returns 127 in bash and would
   [ -n "${rc_cap[$idx]}" ] && return 0      # corrupt the seat's real status — so cache it, never re-wait.
   wait "${pids[$idx]}"; rc_cap[$idx]=$?
+}
+_elapsed() {  # _elapsed <start_epoch> -> "Nm SSs"
+  local s=$(( $(date +%s) - ${1:-0} )); [ "$s" -lt 0 ] && s=0
+  printf '%dm%02ds' "$(( s / 60 ))" "$(( s % 60 ))"
+}
+# A live seat produces NO interim output — `claude -p --output-format text` writes its answer only at the
+# very end — so silence is NORMAL, not a hang. Emit a strong, elapsed-stamped heartbeat that PROVES the seat
+# is alive, so no external watcher (codex, a harness) abandons a slow-but-working seat and closes early.
+# Liveness is read from the process (kill -0), never inferred from elapsed time; a live seat is only ever
+# ended by its own FUSION_TIMEOUT (exit 124), never by "it's been quiet too long".
+alive_heartbeat() {  # alive_heartbeat <idx> — print a heartbeat iff the seat is still alive
+  local idx="$1"
+  kill -0 "${pids[$idx]}" 2>/dev/null || return 1
+  log "  still working: ${labels[$idx]} ($(_elapsed "${starts[$idx]}") elapsed) — no interim output is normal at max effort; a live seat is NOT frozen. Waiting up to ${FUSION_TIMEOUT}s per seat before it is treated as timed out; do not abort."
 }
 # GPT-5.5 (codex) is a SEPARATE provider (OpenAI) — it never touches the Anthropic rate-limit pool, so it
 # always runs in parallel. The two Opus seats DO share one Anthropic pool; launching both at once is what
@@ -177,7 +192,15 @@ if [ "$claude_ok" = 1 ]; then
   launch "Opus run 1" run_claude.sh "$PDIR/opus1.md" max
   if [ "$opus_seats" -ge 2 ]; then
     if [ "${FUSION_OPUS_SERIAL:-1}" = 1 ]; then
-      reap "$(( ${#pids[@]} - 1 ))"          # finish Opus run 1 (cache its rc) before starting Opus run 2
+      # Serial handoff: finish Opus run 1 before starting Opus run 2 — but NEVER with a silent `wait`. A
+      # plain wait here blocks for the seat's whole (multi-minute, output-less) runtime, and that dead-silent
+      # window is exactly what an external watcher misreads as a hang. So poll + heartbeat until it exits.
+      o1_idx=$(( ${#pids[@]} - 1 ))
+      while kill -0 "${pids[$o1_idx]}" 2>/dev/null; do
+        alive_heartbeat "$o1_idx"
+        sleep "$PROGRESS_INTERVAL"
+      done
+      reap "$o1_idx"                          # cache its rc (idempotent)
       log "  Opus run 1 finished (serial) — launching Opus run 2"
     fi
     launch "Opus run 2" run_claude.sh "$PDIR/opus2.md" max
@@ -189,12 +212,11 @@ n="${#pids[@]}"
 done_mark=(); i=0; while [ "$i" -lt "$n" ]; do done_mark+=(0); i=$((i+1)); done
 remaining="$n"
 while [ "$remaining" -gt 0 ]; do
-  still=""
   i=0
   while [ "$i" -lt "$n" ]; do
     if [ "${done_mark[$i]}" = 0 ]; then
       if kill -0 "${pids[$i]}" 2>/dev/null; then
-        still="$still ${labels[$i]};"
+        alive_heartbeat "$i"                  # strong, elapsed-stamped "still working" — never looks frozen
       else
         done_mark[$i]=1; remaining=$((remaining-1))
         log "  ${labels[$i]} finished"
@@ -203,7 +225,6 @@ while [ "$remaining" -gt 0 ]; do
     i=$((i+1))
   done
   [ "$remaining" -le 0 ] && break
-  [ -n "$still" ] && log "  still running:$still"
   sleep "$PROGRESS_INTERVAL"
 done
 

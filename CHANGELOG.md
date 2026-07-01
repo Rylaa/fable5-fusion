@@ -3,6 +3,37 @@
 All notable changes to fable5-fusion are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.3] - 2026-07-01
+
+Fix a heartbeat regression from v1.4.2: a slow-but-**alive** Opus seat could look "stuck" and get abandoned.
+
+### Fixed
+- **Silent serial window (regression from v1.4.2).** v1.4.2 made the two Opus seats run serially, but the
+  serial hand-off used a plain `wait` that ran *before* the progress loop — so for the whole (multi-minute,
+  output-less) runtime of Opus run 1 the runner emitted **nothing**. `claude -p --output-format text` also
+  writes its answer only at the very end, so an external watcher (the Codex orchestrator, a harness) read
+  that dead silence as a hang and closed the report early with just the GPT-5.5 result. The serial hand-off
+  now polls + heartbeats until the seat exits instead of blocking silently.
+- **Strong, elapsed-stamped heartbeat.** Both the serial hand-off and the main poll loop now emit
+  `still working: Opus run 1 (Nm SSs elapsed) — no interim output is normal at max effort; a live seat is
+  NOT frozen. Waiting up to <FUSION_TIMEOUT>s …` every `FUSION_PROGRESS_INTERVAL` (default 20s). Liveness is
+  read from the process (`kill -0`), never inferred from elapsed time — a live seat is only ever ended by
+  its own `FUSION_TIMEOUT` (exit 124), a real crash, or empty output. Heartbeats go to stderr only; the
+  final answer on stdout is untouched.
+- `FUSION_PROGRESS_INTERVAL` is validated as a positive integer (else 20).
+
+### Changed
+- `codex/prompts/fusion.md` now tells the Codex orchestrator, explicitly: do **not** abort/Ctrl-C/terminate
+  the run or close with only the Codex output while heartbeats show a live Opus seat — a serial panel can
+  take 20–40 min; a slow seat is not absent; raise `FUSION_TIMEOUT` for heavy tasks instead of hand-killing.
+
+Policy (unchanged, now enforced end-to-end): **slow ≠ absent.** A seat is ABSENT only on a real timeout
+(exit 124), a crash/non-zero exit, or empty output — never merely for being quiet.
+
+Tested: `codex/tests/fusion-runner.test.sh` 90/0 (77 from v1.4.2 unchanged + 13 new: serial heartbeat with
+elapsed stamp inside the serial window, slow seat collected OK not ABSENT, no stdout leak, and parallel-mode
+heartbeat). Claude Code path unchanged.
+
 ## [1.4.2] - 2026-07-01
 
 Stabilize the panel when Opus seats are dropped by the shared Anthropic rate-limit pool (most visible as

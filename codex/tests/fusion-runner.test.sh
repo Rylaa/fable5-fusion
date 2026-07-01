@@ -53,7 +53,9 @@ echo "run_claude out=\$(basename "\$2") effort=\$3 model=\${4:-_} prompt=\$(base
 case "\$(basename "\$2")" in
   judge_out.md) [ -n "\${STUB_CLAUDE_JUDGE_FAIL:-}" ] && { echo "stub: claude judge forced-fail" >&2; exit 1; } ;;
   synth_out.md) [ -n "\${STUB_CLAUDE_SYNTH_FAIL:-}" ] && { echo "stub: claude synth forced-fail" >&2; exit 1; } ;;
-  opus1.md|opus2.md) [ -n "\${STUB_CLAUDE_PANEL_FAIL:-}" ] && { echo "stub: claude panelist forced-fail" >&2; exit 1; } ;;
+  opus1.md|opus2.md)
+    [ -n "\${STUB_CLAUDE_PANEL_FAIL:-}" ] && { echo "stub: claude panelist forced-fail" >&2; exit 1; }
+    [ -n "\${STUB_CLAUDE_PANEL_SLEEP:-}" ] && sleep "\${STUB_CLAUDE_PANEL_SLEEP}" ;;
 esac
 printf 'FAKE-CLAUDE-ANSWER for %s\n(stub)\n' "\$(basename "\$2")" > "\$2"
 exit 0
@@ -279,6 +281,33 @@ rc12=$?; n12="$(wc -l < "$cnt2" | tr -d ' ')"
 check "run_claude exit 1 (real failure)"  "[ '$rc12' = 1 ]"
 check "made exactly 1 attempt (no retry)" "[ '$n12' = 1 ]"
 rm -rf "$T12"
+
+echo
+echo "== Test 13: slow-but-alive serial Opus emits a strong heartbeat (not treated as stuck) =="
+make_stubs ready ready
+OUT="$STUB/t13"
+rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 STUB_CLAUDE_PANEL_SLEEP=3 bash "$RUNNER" "do the thing" >"$OUT.out" 2>"$OUT.err"; echo $?)"
+check "exit 0"                               "[ '$rc' = 0 ]"
+check "heartbeat 'still working' printed"    "grep -q 'still working:' '$OUT.err'"
+check "heartbeat names the live seat"        "grep -q 'still working: Opus run 1' '$OUT.err'"
+check "heartbeat carries an elapsed stamp"   "grep -qE 'still working: Opus run 1 \([0-9]+m[0-9][0-9]s elapsed\)' '$OUT.err'"
+check "heartbeat reassures (not frozen)"     "grep -q 'no interim output is normal' '$OUT.err'"
+check "heartbeat lands in the serial window" "grep -q 'launched Opus run 1' '$OUT.err' && grep -q 'Opus run 1 finished (serial)' '$OUT.err'"
+check "slow Opus collected OK (not ABSENT)"  "grep -q 'Opus run 1: OK' '$OUT.err'"
+check "slug is still the full panel"         "grep -q 'save slug=opus4.8x2-gpt5.5 ' '$CALLOG'"
+check "no heartbeat leaks to stdout"         "! grep -q 'still working' '$OUT.out'"
+rm -rf "$STUB"
+
+echo
+echo "== Test 14: parallel mode (FUSION_OPUS_SERIAL=0) also emits the strong heartbeat =="
+make_stubs ready ready
+OUT="$STUB/t14"
+rc="$(FUSION_SCRIPTS="$SCR" FUSION_PROGRESS_INTERVAL=1 FUSION_OPUS_SERIAL=0 STUB_CLAUDE_PANEL_SLEEP=3 bash "$RUNNER" "do the thing" >"$OUT.out" 2>"$OUT.err"; echo $?)"
+check "exit 0"                               "[ '$rc' = 0 ]"
+check "heartbeat printed in parallel mode"   "grep -q 'still working: Opus run' '$OUT.err'"
+check "no serial-handoff line in parallel"   "! grep -q 'finished (serial)' '$OUT.err'"
+check "both Opus collected OK"               "grep -q 'Opus run 1: OK' '$OUT.err' && grep -q 'Opus run 2: OK' '$OUT.err'"
+rm -rf "$STUB"
 
 echo
 echo "================================"

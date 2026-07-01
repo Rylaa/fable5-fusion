@@ -29,8 +29,18 @@ FUSION_TASK_EOF_a9f3c1
 
 The runner streams `[fusion] …` progress to stderr (Step 0 detect → Step 1 preflight → Step 2 panel →
 Step 3 judge → Step 4 synth → Step 5 save → Step 6 present). Codex shows this as ONE long-running
-command — that is expected, it is **not** frozen; a full panel routinely runs several minutes, and
-each seat is bounded by `FUSION_TIMEOUT` (default 1800s) so a stuck seat can't hang it.
+command — that is expected, it is **not** frozen; a full panel routinely runs several minutes.
+
+**Do NOT abort, Ctrl-C, kill, or "cleanly terminate" this command, and do NOT close the report with just
+the GPT-5.5 / Codex output, while an Opus seat is still working.** An Opus seat at max effort produces **no
+interim output** — silence is normal, not a hang. The runner proves each seat is alive with a
+`[fusion]   still working: Opus run 1 (Nm SSs elapsed) …` heartbeat every ~20s; **as long as those
+heartbeats keep coming, wait.** A serial panel (default) runs the two Opus seats one at a time and can take
+**20–40 minutes** on a heavy task. A slow-but-alive seat is **not** absent: the only things that end a seat
+are its own `FUSION_TIMEOUT` (default 1800s → the runner drops it and reports ABSENT), a genuine crash, or
+empty output. For a heavy task raise the budget up front (`FUSION_TIMEOUT=3600`); never hand-kill a live
+seat. Closing early with only the Codex result is correct **only** when Opus is genuinely absent (no
+`claude`, a crash, empty output, or a real timeout) — not merely slow.
 
 When it finishes, its **stdout** holds the result in two parts: `===== FUSION FINAL ANSWER =====` and
 `===== FUSION AUDIT TRAIL =====`. Present it to the user **final answer first** (verbatim — do not
